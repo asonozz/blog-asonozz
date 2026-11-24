@@ -81,19 +81,19 @@ body {
 .owner-only,
 .owner-only-block,
 .owner-only-flex {
-  display: none;
+  display: none !important;
 }
 
 body.is-owner .owner-only {
-  display: inline-flex;
+  display: inline-flex !important;
 }
 
 body.is-owner .owner-only-block {
-  display: block;
+  display: block !important;
 }
 
 body.is-owner .owner-only-flex {
-  display: flex;
+  display: flex !important;
 }
 
 /* Barra de progresso no topo */

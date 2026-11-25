@@ -1893,3 +1893,52 @@ body.is-owner .owner-only-flex {
   padding: 2px 10px;
   border-radius: 999px;
 }
+
+/* Controles de formato e tamanho da foto no modal do card */
+.story-modal-box {
+  max-width: 480px;
+}
+
+.story-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.story-control-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.story-control-label {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  min-width: 58px;
+}
+
+.story-pill-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.story-pill-group .pill {
+  padding: 4px 10px;
+  font-size: 0.76rem;
+}
+
+#storyCanvas {
+  width: auto !important;
+  height: auto !important;
+  max-width: 100%;
+  max-height: 360px;
+  border-radius: 14px;
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.22);
+  display: block;
+}

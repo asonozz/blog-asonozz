@@ -59,6 +59,10 @@ let state = {
   activeCategory: "todos",
   searchQuery: "",
   currentPostId: null,
+  pendingPostIdFromHash: null,
+  storyTheme: "light",
+  storyFormat: "story",
+  storyPhotoSize: "md",
   currentLightboxPhotoId: null,
   tempPostImage: "",
   tempProfileAvatar: "",
@@ -95,8 +99,8 @@ function escapeHtml(text = "") {
   const div = document.createElement("div");
   div.textContent = String(text);
   return div.innerHTML
-    .replaceAll('"', "&" + "quot;")
-    .replaceAll("'", "&" + "#39;");
+    .replace(/"/g, "&" + "quot;")
+    .replace(/'/g, "&" + "#39;");
 }
 
 function formatDate(isoDate) {
@@ -127,9 +131,29 @@ function formatPostContent(content = "") {
     .join("");
 }
 
-function getExcerpt(content = "") {
+function getExcerpt(content = "", maxLen = 165) {
   const plain = content.replace(/^>\s?/gm, "").replace(/\s+/g, " ").trim();
-  return plain.length > 165 ? plain.slice(0, 165) + "..." : plain;
+  return plain.length > maxLen ? plain.slice(0, maxLen) + "..." : plain;
+}
+
+function getPostShareUrl(postId) {
+  const base = window.location.origin + window.location.pathname;
+  return `${base}#post=${encodeURIComponent(postId)}`;
+}
+
+async function copyTextToClipboard(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.select();
+  document.execCommand("copy");
+  ta.remove();
 }
 
 function compressImageFile(file, maxWidth, callback) {
@@ -155,7 +179,7 @@ async function initFirebaseIfConfigured() {
   if (!HAS_FIREBASE) {
     state.isOwner = localStorage.getItem(STORAGE_KEYS.demoOwner) === "true";
     syncOwnerUI();
-    checkAdminHash();
+    checkUrlHash();
     return;
   }
 
@@ -181,7 +205,7 @@ async function initFirebaseIfConfigured() {
       state.isOwner = Boolean(user);
       if (user) closeLoginModal();
       syncOwnerUI();
-      checkAdminHash();
+      checkUrlHash();
     });
   } catch (err) {
     console.error("Erro ao iniciar Firebase:", err);
@@ -194,7 +218,6 @@ function subscribeToCloud() {
 
   const { doc, collection, onSnapshot } = cloud.fns;
 
-  // Perfil em tempo real
   onSnapshot(
     doc(cloud.db, "site", "profile"),
     snap => {
@@ -208,7 +231,6 @@ function subscribeToCloud() {
     err => console.error("Erro ao sincronizar perfil:", err)
   );
 
-  // Textos em tempo real
   onSnapshot(
     collection(cloud.db, "posts"),
     snap => {
@@ -217,6 +239,16 @@ function subscribeToCloud() {
         .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
       renderPosts();
       if (state.activeView === "archive") renderArchive();
+
+      if (state.pendingPostIdFromHash) {
+        const targetId = state.pendingPostIdFromHash;
+        if (state.posts.some(p => p.id === targetId)) {
+          state.pendingPostIdFromHash = null;
+          openPostDetail(targetId, true);
+          return;
+        }
+      }
+
       if (state.activeView === "post" && state.currentPostId) {
         const stillExists = state.posts.some(p => p.id === state.currentPostId);
         if (stillExists) openPostDetail(state.currentPostId, false);
@@ -226,7 +258,6 @@ function subscribeToCloud() {
     err => console.error("Erro ao sincronizar textos:", err)
   );
 
-  // Mural de fotos em tempo real
   onSnapshot(
     collection(cloud.db, "photos"),
     snap => {
@@ -238,7 +269,6 @@ function subscribeToCloud() {
     err => console.error("Erro ao sincronizar mural:", err)
   );
 
-  // Devaneios em tempo real
   onSnapshot(
     collection(cloud.db, "projects"),
     snap => {
@@ -250,7 +280,6 @@ function subscribeToCloud() {
     err => console.error("Erro ao sincronizar devaneios:", err)
   );
 
-  // Bilhetinhos em tempo real
   onSnapshot(
     collection(cloud.db, "comments"),
     snap => {
@@ -322,7 +351,7 @@ async function removeDoc(colName, id) {
   }
 }
 
-// Modo dono / visitante
+// Modo dono / visitante & URLs diretas
 function syncOwnerUI() {
   document.body.classList.toggle("is-owner", state.isOwner);
   const pendingCount = state.comments.filter(c => !c.approved).length;
@@ -334,10 +363,25 @@ function syncOwnerUI() {
   }
 }
 
-function checkAdminHash() {
-  if (window.location.hash === "#admin" && !state.isOwner) {
+function checkUrlHash() {
+  const hash = window.location.hash || "";
+
+  if (hash === "#admin" && !state.isOwner) {
     openLoginModal();
     history.replaceState(null, "", window.location.pathname + window.location.search);
+    return;
+  }
+
+  if (hash.startsWith("#post=")) {
+    const postId = decodeURIComponent(hash.slice(6));
+    if (!postId) return;
+    const found = state.posts.find(p => p.id === postId);
+    if (found) {
+      state.pendingPostIdFromHash = null;
+      openPostDetail(postId, true);
+    } else {
+      state.pendingPostIdFromHash = postId;
+    }
   }
 }
 
@@ -579,6 +623,12 @@ function openPostDetail(postId, shouldSwitch = true) {
   if (!post) return;
 
   state.currentPostId = postId;
+
+  const targetHash = `#post=${encodeURIComponent(postId)}`;
+  if (window.location.hash !== targetHash) {
+    history.replaceState(null, "", targetHash);
+  }
+
   const detailEl = document.getElementById("postDetailContent");
   detailEl.innerHTML = `
     <div class="post-meta">
@@ -591,6 +641,15 @@ function openPostDetail(postId, shouldSwitch = true) {
     <h1 class="post-detail-title">${escapeHtml(post.title)}</h1>
     ${post.image ? `<img class="post-detail-cover" src="${escapeHtml(post.image)}" alt="${escapeHtml(post.title)}">` : ""}
     <div class="post-body">${formatPostContent(post.content)}</div>
+
+    <div class="post-share-bar">
+      <span class="post-share-label">⋆ compartilhar esta página</span>
+      <div class="post-share-buttons">
+        <button class="btn btn-outline btn-sm" id="copyPostLinkBtn">Copiar link</button>
+        <button class="btn btn-primary btn-sm" id="openStoryModalBtn">Card pro Story</button>
+      </div>
+    </div>
+
     <div class="post-detail-actions owner-only-flex">
       <button class="btn btn-outline btn-sm" id="togglePinPostBtn">${post.pinned ? "Desafixar" : "★ Fixar no topo"}</button>
       <button class="btn btn-outline btn-sm" id="editCurrentPostBtn">Editar texto</button>
@@ -598,6 +657,18 @@ function openPostDetail(postId, shouldSwitch = true) {
     </div>
   `;
 
+  const copyBtn = document.getElementById("copyPostLinkBtn");
+  copyBtn.addEventListener("click", async () => {
+    try {
+      await copyTextToClipboard(getPostShareUrl(post.id));
+      copyBtn.textContent = "✓ Link copiado!";
+      setTimeout(() => (copyBtn.textContent = "Copiar link"), 2200);
+    } catch {
+      alert("Não foi possível copiar o link automaticamente.");
+    }
+  });
+
+  document.getElementById("openStoryModalBtn").addEventListener("click", () => openShareStoryModal(post));
   document.getElementById("togglePinPostBtn").addEventListener("click", () => togglePinPost(post.id));
   document.getElementById("editCurrentPostBtn").addEventListener("click", () => openPostModal(post));
   document.getElementById("deleteCurrentPostBtn").addEventListener("click", () => deletePost(post.id));
@@ -608,6 +679,413 @@ function openPostDetail(postId, shouldSwitch = true) {
   }
 
   renderCommentsForPost(postId);
+}
+
+// === GERADOR DE CARD PARA STORIES / FEED / QUADRADO ===
+function loadImageForCanvas(src) {
+  return new Promise(resolve => {
+    if (!src) {
+      resolve(null);
+      return;
+    }
+    const img = new Image();
+    if (!src.startsWith("data:")) {
+      img.crossOrigin = "anonymous";
+    }
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = src;
+  });
+}
+
+function drawRoundedRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function drawImageCover(ctx, img, x, y, w, h) {
+  const imgRatio = img.width / img.height;
+  const boxRatio = w / h;
+  let sx = 0, sy = 0, sw = img.width, sh = img.height;
+
+  if (imgRatio > boxRatio) {
+    sw = img.height * boxRatio;
+    sx = (img.width - sw) / 2;
+  } else {
+    sh = img.width / boxRatio;
+    sy = (img.height - sh) / 2;
+  }
+  ctx.drawImage(img, sx, sy, sw, sh, x, y, w, h);
+}
+
+function wrapCanvasText(ctx, text, maxWidth, maxLines) {
+  const words = String(text || "").replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
+  const lines = [];
+  let current = "";
+
+  for (const word of words) {
+    const test = current ? `${current} ${word}` : word;
+    if (ctx.measureText(test).width <= maxWidth) {
+      current = test;
+    } else {
+      if (current) lines.push(current);
+      current = word;
+      if (lines.length === maxLines - 1) break;
+    }
+  }
+  if (current && lines.length < maxLines) {
+    lines.push(current);
+  }
+
+  const joinedLen = lines.join(" ").length;
+  const fullLen = words.join(" ").length;
+  if (lines.length === maxLines && joinedLen < fullLen) {
+    let last = lines[maxLines - 1];
+    while (ctx.measureText(last + "…").width > maxWidth && last.length > 3) {
+      last = last.slice(0, -1).trim();
+    }
+    lines[maxLines - 1] = last + "…";
+  }
+
+  return lines;
+}
+
+async function renderStoryCard(post) {
+  const canvas = document.getElementById("storyCanvas");
+  const ctx = canvas.getContext("2d");
+
+  const format = state.storyFormat || "story";
+  const theme = state.storyTheme || "light";
+  const photoSize = state.storyPhotoSize || "md";
+
+  const presets = {
+    story: { W: 1080, H: 1920, padX: 72, cardY: 110, bottomGap: 220, innerPad: 64, headerH: 114, footerH: 122 },
+    portrait: { W: 1080, H: 1350, padX: 56, cardY: 56, bottomGap: 56, innerPad: 56, headerH: 98, footerH: 108 },
+    square: { W: 1080, H: 1080, padX: 48, cardY: 48, bottomGap: 48, innerPad: 52, headerH: 92, footerH: 98 }
+  };
+  const cfg = presets[format] || presets.story;
+  const { W, H, padX, cardY, bottomGap, innerPad, headerH, footerH } = cfg;
+
+  canvas.width = W;
+  canvas.height = H;
+  canvas.style.aspectRatio = `${W} / ${H}`;
+
+  if (document.fonts && document.fonts.ready) {
+    try { await document.fonts.ready; } catch {}
+  }
+
+  const isDark = theme === "dark";
+  const palette = isDark
+    ? {
+        bg: "#130f10",
+        card: "#1b1517",
+        border: "rgba(227, 61, 72, 0.34)",
+        dot: "rgba(255, 255, 255, 0.05)",
+        crimson: "#e33d48",
+        text: "#f7f1f1",
+        muted: "#b9a8ab",
+        pillBg: "#271d20",
+        pillBorder: "rgba(255, 255, 255, 0.12)",
+        polaroidBg: "#f8f4ef",
+        watermark: "rgba(227, 61, 72, 0.07)"
+      }
+    : {
+        bg: "#f7f2ec",
+        card: "#fcfaf7",
+        border: "rgba(184, 29, 39, 0.30)",
+        dot: "rgba(184, 29, 39, 0.08)",
+        crimson: "#b81d27",
+        text: "#221a1c",
+        muted: "#6d5c60",
+        pillBg: "#f2ebe4",
+        pillBorder: "rgba(34, 26, 28, 0.12)",
+        polaroidBg: "#ffffff",
+        watermark: "rgba(184, 29, 39, 0.055)"
+      };
+
+  // Fundo base
+  ctx.fillStyle = palette.bg;
+  ctx.fillRect(0, 0, W, H);
+
+  // Textura pontilhada de caderno
+  ctx.fillStyle = palette.dot;
+  for (let gx = 48; gx < W; gx += 42) {
+    for (let gy = 48; gy < H; gy += 42) {
+      ctx.beginPath();
+      ctx.arc(gx, gy, 2.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // Cartão central tipo folha de scrapbook
+  const cardW = W - padX * 2;
+  const cardH = H - cardY - bottomGap;
+
+  ctx.save();
+  ctx.shadowColor = isDark ? "rgba(0,0,0,0.45)" : "rgba(34,26,28,0.12)";
+  ctx.shadowBlur = 46;
+  ctx.shadowOffsetY = 20;
+  drawRoundedRect(ctx, padX, cardY, cardW, cardH, 34);
+  ctx.fillStyle = palette.card;
+  ctx.fill();
+  ctx.restore();
+
+  // Borda interna tracejada
+  ctx.save();
+  drawRoundedRect(ctx, padX + 20, cardY + 20, cardW - 40, cardH - 40, 24);
+  ctx.setLineDash([12, 12]);
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = palette.border;
+  ctx.stroke();
+  ctx.restore();
+
+  // Marca d'água 愛
+  ctx.save();
+  ctx.fillStyle = palette.watermark;
+  ctx.font = `700 ${format === "square" ? 420 : 520}px serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("愛", W / 2 + 110, cardY + cardH * 0.62);
+  ctx.restore();
+
+  const contentX = padX + innerPad;
+  const contentW = cardW - innerPad * 2;
+  const footerY = cardY + cardH - footerH;
+  let cursorY = cardY + (format === "story" ? 72 : 52);
+
+  // Selo hanko vermelho + nome do blog
+  const sealSize = format === "story" ? 70 : 62;
+  drawRoundedRect(ctx, contentX, cursorY, sealSize, sealSize, 15);
+  ctx.fillStyle = palette.crimson;
+  ctx.fill();
+  ctx.fillStyle = "#ffffff";
+  ctx.font = `700 ${format === "story" ? 40 : 36}px serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("愛", contentX + sealSize / 2, cursorY + sealSize / 2 + 2);
+
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+  ctx.fillStyle = palette.text;
+  ctx.font = `700 ${format === "story" ? 40 : 36}px 'Coolvetica', 'Quicksand', sans-serif`;
+  ctx.fillText(state.profile.name || "asonozz.", contentX + sealSize + 20, cursorY + Math.round(sealSize * 0.48));
+
+  ctx.fillStyle = palette.muted;
+  ctx.font = `500 ${format === "story" ? 23 : 20}px 'JetBrains Mono', monospace`;
+  ctx.fillText("⋆⭒˚.⋆ novo texto no caderno", contentX + sealSize + 20, cursorY + Math.round(sealSize * 0.90));
+
+  cursorY += headerH;
+
+  const availableH = footerY - cursorY - 24;
+
+  // Foto do post com escolha de tamanho
+  const loadedImg = photoSize === "none" ? null : await loadImageForCanvas(post.image);
+
+  if (loadedImg) {
+    const framePad = format === "square" ? 16 : 20;
+    const polaroidBottomLip = format === "square" ? 28 : 38;
+    let polW = contentW;
+    let polH = Math.round(availableH * 0.44);
+
+    if (photoSize === "sm") {
+      polW = Math.round(contentW * 0.72);
+      polH = Math.round(availableH * 0.30);
+    } else if (photoSize === "md") {
+      polW = contentW;
+      polH = Math.round(availableH * 0.44);
+    } else if (photoSize === "lg") {
+      polW = contentW;
+      polH = Math.round(availableH * 0.58);
+    } else if (photoSize === "contain") {
+      const maxImgW = contentW - framePad * 2;
+      const maxImgH = Math.round(availableH * 0.56) - framePad * 2 - polaroidBottomLip;
+      const ratio = Math.min(maxImgW / loadedImg.width, maxImgH / loadedImg.height);
+      const drawW = Math.round(loadedImg.width * ratio);
+      const drawH = Math.round(loadedImg.height * ratio);
+      polW = drawW + framePad * 2;
+      polH = drawH + framePad * 2 + polaroidBottomLip;
+    }
+
+    const imgBoxW = polW - framePad * 2;
+    const imgBoxH = polH - framePad * 2 - polaroidBottomLip;
+    const polCenterX = contentX + contentW / 2;
+    const polCenterY = cursorY + polH / 2;
+
+    ctx.save();
+    ctx.translate(polCenterX, polCenterY);
+    ctx.rotate(-0.012);
+
+    ctx.shadowColor = "rgba(0,0,0,0.18)";
+    ctx.shadowBlur = 26;
+    ctx.shadowOffsetY = 10;
+    drawRoundedRect(ctx, -polW / 2, -polH / 2, polW, polH, 14);
+    ctx.fillStyle = palette.polaroidBg;
+    ctx.fill();
+    ctx.shadowColor = "transparent";
+
+    ctx.save();
+    drawRoundedRect(ctx, -polW / 2 + framePad, -polH / 2 + framePad, imgBoxW, imgBoxH, 8);
+    ctx.clip();
+    if (photoSize === "contain") {
+      ctx.drawImage(loadedImg, -polW / 2 + framePad, -polH / 2 + framePad, imgBoxW, imgBoxH);
+    } else {
+      drawImageCover(ctx, loadedImg, -polW / 2 + framePad, -polH / 2 + framePad, imgBoxW, imgBoxH);
+    }
+    ctx.restore();
+
+    // Fita adesiva decorativa no topo
+    const tapeW = Math.min(140, Math.round(polW * 0.28));
+    ctx.fillStyle = isDark ? "rgba(227, 61, 72, 0.35)" : "rgba(184, 29, 39, 0.22)";
+    ctx.fillRect(-tapeW / 2, -polH / 2 - 12, tapeW, 28);
+
+    ctx.restore();
+    cursorY += polH + (format === "square" ? 26 : 40);
+  } else {
+    cursorY += format === "story" ? 34 : 18;
+    ctx.fillStyle = palette.crimson;
+    ctx.fillRect(contentX, cursorY, 92, 6);
+    cursorY += format === "story" ? 56 : 40;
+  }
+
+  // Etiquetas de Data e Categoria
+  const dateText = formatDate(post.date);
+  const catText = (post.category || "pensamentos").toUpperCase();
+  const pillH = format === "square" ? 42 : 48;
+
+  ctx.font = `600 ${format === "square" ? 20 : 23}px 'JetBrains Mono', monospace`;
+  const dateW = ctx.measureText(dateText).width + 38;
+  const catW = ctx.measureText(catText).width + 38;
+
+  drawRoundedRect(ctx, contentX, cursorY, dateW, pillH, pillH / 2);
+  ctx.fillStyle = palette.pillBg;
+  ctx.fill();
+  ctx.strokeStyle = palette.pillBorder;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.fillStyle = palette.text;
+  ctx.textBaseline = "middle";
+  ctx.fillText(dateText, contentX + 19, cursorY + pillH / 2 + 1);
+
+  drawRoundedRect(ctx, contentX + dateW + 14, cursorY, catW, pillH, pillH / 2);
+  ctx.fillStyle = palette.crimson;
+  ctx.fill();
+  ctx.fillStyle = "#ffffff";
+  ctx.fillText(catText, contentX + dateW + 33, cursorY + pillH / 2 + 1);
+
+  cursorY += pillH + (format === "square" ? 42 : 52);
+
+  // Título (ajustado automaticamente ao espaço que sobrou)
+  const remAfterPills = footerY - cursorY - 20;
+  const titleFontSize = format === "story"
+    ? (photoSize === "lg" && loadedImg ? 54 : 64)
+    : format === "portrait"
+      ? (photoSize === "lg" && loadedImg ? 46 : 54)
+      : (photoSize === "lg" && loadedImg ? 40 : 48);
+  const titleLineH = titleFontSize + 12;
+  const maxTitleLines = Math.max(
+    1,
+    Math.min(loadedImg ? 3 : 4, Math.floor((remAfterPills - 44) / titleLineH))
+  );
+
+  ctx.textBaseline = "alphabetic";
+  ctx.fillStyle = palette.text;
+  ctx.font = `700 ${titleFontSize}px 'Coolvetica', 'Quicksand', sans-serif`;
+  const titleLines = wrapCanvasText(ctx, post.title, contentW, maxTitleLines);
+  for (const line of titleLines) {
+    ctx.fillText(line, contentX, cursorY);
+    cursorY += titleLineH;
+  }
+
+  cursorY += 16;
+
+  // Trecho do texto (preenche apenas o espaço seguro acima do rodapé)
+  const bodyFontSize = format === "story" ? 32 : 28;
+  const bodyLineH = bodyFontSize + 14;
+  const bodyRemH = footerY - cursorY - 18;
+  const maxBodyLines = Math.floor(bodyRemH / bodyLineH);
+
+  if (maxBodyLines >= 1) {
+    const cleanExcerpt = String(post.content || "")
+      .replace(/^>\s?/gm, "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    ctx.fillStyle = palette.muted;
+    ctx.font = `500 ${bodyFontSize}px 'Coolvetica', 'Quicksand', sans-serif`;
+    const bodyLines = wrapCanvasText(ctx, cleanExcerpt, contentW, maxBodyLines);
+    for (const line of bodyLines) {
+      ctx.fillText(line, contentX, cursorY);
+      cursorY += bodyLineH;
+    }
+  }
+
+  // Rodapé interno do cartão
+  ctx.strokeStyle = palette.border;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(contentX, footerY);
+  ctx.lineTo(contentX + contentW, footerY);
+  ctx.stroke();
+
+  ctx.fillStyle = palette.crimson;
+  ctx.font = `600 ${format === "square" ? 22 : 25}px 'JetBrains Mono', monospace`;
+  const ctaLine = format === "story"
+    ? "toque no link abaixo para ler ↓"
+    : "leia o texto completo no blog →";
+  ctx.fillText(ctaLine, contentX, footerY + (format === "square" ? 42 : 50));
+
+  ctx.fillStyle = palette.muted;
+  ctx.font = `500 ${format === "square" ? 20 : 22}px 'JetBrains Mono', monospace`;
+  const hostDisplay = window.location.host || "blog-asonozz.vercel.app";
+  ctx.fillText(`${state.profile.handle || "@asonozz"}  ·  ${hostDisplay}`, contentX, footerY + (format === "square" ? 74 : 86));
+}
+
+function getStoryBlob() {
+  const canvas = document.getElementById("storyCanvas");
+  return new Promise(resolve => canvas.toBlob(blob => resolve(blob), "image/png"));
+}
+
+async function openShareStoryModal(post) {
+  const currentTheme = document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
+  state.storyTheme = currentTheme;
+  state.storyFormat = "story";
+  state.storyPhotoSize = "md";
+
+  document.getElementById("storyThemeLightBtn").classList.toggle("active", currentTheme === "light");
+  document.getElementById("storyThemeDarkBtn").classList.toggle("active", currentTheme === "dark");
+
+  document.querySelectorAll("#storyFormatGroup .pill").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.storyFormat === state.storyFormat);
+  });
+
+  const photoRow = document.getElementById("storyPhotoSizeRow");
+  photoRow.hidden = !Boolean(post.image);
+  document.querySelectorAll("#storyPhotoSizeGroup .pill").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.storyPhoto === state.storyPhotoSize);
+  });
+
+  document.getElementById("storyShareFeedback").textContent = "";
+  document.getElementById("shareStoryModal").hidden = false;
+
+  await renderStoryCard(post);
+
+  const nativeBtn = document.getElementById("nativeShareStoryBtn");
+  const blob = await getStoryBlob();
+  if (blob && navigator.canShare) {
+    const testFile = new File([blob], "story-asonozz.png", { type: "image/png" });
+    nativeBtn.hidden = !navigator.canShare({ files: [testFile] });
+  } else {
+    nativeBtn.hidden = true;
+  }
+}
+
+function closeShareStoryModal() {
+  document.getElementById("shareStoryModal").hidden = true;
 }
 
 async function togglePinPost(postId) {
@@ -825,6 +1303,13 @@ function renderAbout() {
 function switchView(viewName, scrollToFeed = false) {
   state.activeView = viewName;
   document.getElementById("siteCover").hidden = viewName !== "home";
+
+  if (viewName !== "post") {
+    state.currentPostId = null;
+    if (window.location.hash.startsWith("#post=")) {
+      history.replaceState(null, "", window.location.pathname + window.location.search);
+    }
+  }
 
   document.querySelectorAll(".view").forEach(v => (v.hidden = true));
   const target = document.getElementById(`view-${viewName}`);
@@ -1071,8 +1556,99 @@ function bindEvents() {
     sealTimer = setTimeout(() => (sealClicks = 0), 650);
   });
 
-  // Atalho secreto 2: /#admin na URL
-  window.addEventListener("hashchange", checkAdminHash);
+  // Atalho secreto 2 (/#admin) + links diretos de post (/#post=...)
+  window.addEventListener("hashchange", checkUrlHash);
+
+  // Modal de Card / Story
+  document.getElementById("closeShareStoryModalBtn").addEventListener("click", closeShareStoryModal);
+
+  ["storyThemeLightBtn", "storyThemeDarkBtn"].forEach(btnId => {
+    document.getElementById(btnId).addEventListener("click", async e => {
+      const theme = e.currentTarget.dataset.storyTheme;
+      state.storyTheme = theme;
+      document.getElementById("storyThemeLightBtn").classList.toggle("active", theme === "light");
+      document.getElementById("storyThemeDarkBtn").classList.toggle("active", theme === "dark");
+      const post = state.posts.find(p => p.id === state.currentPostId);
+      if (post) await renderStoryCard(post);
+    });
+  });
+
+  document.querySelectorAll("#storyFormatGroup .pill").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      state.storyFormat = btn.dataset.storyFormat;
+      document.querySelectorAll("#storyFormatGroup .pill").forEach(b => {
+        b.classList.toggle("active", b === btn);
+      });
+      const post = state.posts.find(p => p.id === state.currentPostId);
+      if (post) await renderStoryCard(post);
+    });
+  });
+
+  document.querySelectorAll("#storyPhotoSizeGroup .pill").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      state.storyPhotoSize = btn.dataset.storyPhoto;
+      document.querySelectorAll("#storyPhotoSizeGroup .pill").forEach(b => {
+        b.classList.toggle("active", b === btn);
+      });
+      const post = state.posts.find(p => p.id === state.currentPostId);
+      if (post) await renderStoryCard(post);
+    });
+  });
+
+  document.getElementById("downloadStoryBtn").addEventListener("click", async () => {
+    const post = state.posts.find(p => p.id === state.currentPostId);
+    const blob = await getStoryBlob();
+    if (!blob) return;
+    const slug = (post?.title || "post")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)/g, "")
+      .slice(0, 32);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `asonozz-${state.storyFormat}-${slug || "texto"}.png`;
+    a.click();
+    URL.revokeObjectURL(url);
+
+    try {
+      if (state.currentPostId) {
+        await copyTextToClipboard(getPostShareUrl(state.currentPostId));
+      }
+      document.getElementById("storyShareFeedback").textContent = "✓ Card baixado e link copiado! Cole na figurinha de Link do Story.";
+    } catch {
+      document.getElementById("storyShareFeedback").textContent = "Card baixado! Use 'Só copiar link' para colar no Story.";
+    }
+  });
+
+  document.getElementById("nativeShareStoryBtn").addEventListener("click", async () => {
+    const post = state.posts.find(p => p.id === state.currentPostId);
+    const blob = await getStoryBlob();
+    if (!post || !blob) return;
+    try {
+      await copyTextToClipboard(getPostShareUrl(post.id));
+    } catch {}
+    const file = new File([blob], "story-asonozz.png", { type: "image/png" });
+    try {
+      await navigator.share({
+        files: [file],
+        title: post.title,
+        text: `${post.title} — ${getPostShareUrl(post.id)}`
+      });
+    } catch {}
+  });
+
+  document.getElementById("copyStoryLinkBtn").addEventListener("click", async () => {
+    if (!state.currentPostId) return;
+    try {
+      await copyTextToClipboard(getPostShareUrl(state.currentPostId));
+      document.getElementById("storyShareFeedback").textContent = "✓ Link direto copiado para a figurinha do Story!";
+    } catch {
+      document.getElementById("storyShareFeedback").textContent = "Não foi possível copiar o link.";
+    }
+  });
 
   // Login e Logout
   document.getElementById("closeLoginModalBtn").addEventListener("click", closeLoginModal);
@@ -1430,7 +2006,7 @@ function bindEvents() {
   });
 
   // Fechar modais ao clicar fora ou apertar Escape
-  ["postModal", "profileModal", "photoModal", "projectModal", "lightboxModal", "loginModal", "moderationModal"].forEach(modalId => {
+  ["postModal", "profileModal", "photoModal", "projectModal", "lightboxModal", "loginModal", "moderationModal", "shareStoryModal"].forEach(modalId => {
     const modal = document.getElementById(modalId);
     modal.addEventListener("click", e => {
       if (e.target === modal) modal.hidden = true;
@@ -1445,6 +2021,7 @@ function bindEvents() {
       closeProjectModal();
       closeLightbox();
       closeLoginModal();
+      closeShareStoryModal();
       document.getElementById("moderationModal").hidden = true;
     }
   });
@@ -1575,4 +2152,5 @@ initTheme();
 renderAll();
 bindEvents();
 initScrollTelling();
+checkUrlHash();
 initFirebaseIfConfigured();

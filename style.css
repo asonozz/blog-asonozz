@@ -1979,3 +1979,338 @@ body.is-owner .owner-only-flex {
   max-height: 440px;
   object-fit: cover;
 }
+
+/* =========================================================
+   ANIMAÇÕES & MICRO-INTERAÇÕES DO CADERNO
+   ========================================================= */
+
+@keyframes asonozzFadeUp {
+  from {
+    opacity: 0;
+    translate: 0 22px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+@keyframes asonozzViewEnter {
+  from {
+    opacity: 0;
+    translate: 0 12px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+@keyframes asonozzModalBackdrop {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes asonozzModalPop {
+  from {
+    opacity: 0;
+    translate: 0 18px;
+    scale: 0.96;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+    scale: 1;
+  }
+}
+
+@keyframes asonozzWatermarkBreath {
+  0%, 100% {
+    opacity: 0.045;
+  }
+  50% {
+    opacity: 0.09;
+  }
+}
+
+@keyframes asonozzScrollPulse {
+  0%, 100% {
+    opacity: 0.35;
+    scale: 1 0.85;
+  }
+  50% {
+    opacity: 1;
+    scale: 1 1.15;
+  }
+}
+
+@keyframes asonozzTwinkle {
+  0%, 100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes asonozzOwnerPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(255, 255, 255, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0);
+  }
+}
+
+/* Entrada em cascata da capa */
+.cover-top-meta {
+  animation: asonozzFadeUp 0.65s cubic-bezier(0.22, 1, 0.36, 1) 0.05s both;
+}
+
+.cover-title {
+  animation: asonozzFadeUp 0.75s cubic-bezier(0.22, 1, 0.36, 1) 0.14s both;
+}
+
+.cover-tagline {
+  animation: asonozzFadeUp 0.75s cubic-bezier(0.22, 1, 0.36, 1) 0.24s both;
+}
+
+.cover-cta-row {
+  animation: asonozzFadeUp 0.75s cubic-bezier(0.22, 1, 0.36, 1) 0.34s both;
+}
+
+.cover-polaroids {
+  animation: asonozzFadeUp 0.85s cubic-bezier(0.22, 1, 0.36, 1) 0.3s both;
+}
+
+.cover-bottom {
+  animation: asonozzFadeUp 0.75s cubic-bezier(0.22, 1, 0.36, 1) 0.45s both;
+}
+
+.cover-watermark {
+  animation: asonozzWatermarkBreath 7s ease-in-out infinite;
+}
+
+.scroll-line {
+  transform-origin: top center;
+  animation: asonozzScrollPulse 2.4s ease-in-out infinite;
+}
+
+/* Troca suave de abas e abertura de modais */
+.view:not([hidden]) {
+  animation: asonozzViewEnter 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.modal-backdrop:not([hidden]) {
+  animation: asonozzModalBackdrop 0.24s ease-out both;
+}
+
+.modal-backdrop:not([hidden]) .modal-box,
+.modal-backdrop:not([hidden]) .lightbox-box {
+  animation: asonozzModalPop 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Polaroids da capa e do mural com movimento orgânico */
+.cover-polaroid,
+.mural-item {
+  transition:
+    translate 0.38s cubic-bezier(0.22, 1, 0.36, 1),
+    rotate 0.38s cubic-bezier(0.22, 1, 0.36, 1),
+    scale 0.38s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.35s ease,
+    border-color 0.28s ease;
+}
+
+.mural-item:nth-child(odd) {
+  rotate: -1deg;
+}
+
+.mural-item:nth-child(even) {
+  rotate: 1deg;
+}
+
+.mural-item:nth-child(3n) {
+  rotate: -0.5deg;
+}
+
+.mural-item:hover {
+  translate: 0 -7px;
+  rotate: 0deg;
+  scale: 1.02;
+  z-index: 2;
+  box-shadow: 0 18px 34px rgba(0, 0, 0, 0.16);
+}
+
+.cover-polaroid:hover {
+  translate: 0 -8px;
+  scale: 1.04;
+  z-index: 4;
+}
+
+.sidebar-mural-thumb {
+  overflow: hidden;
+}
+
+.sidebar-mural-thumb img {
+  transition: scale 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.sidebar-mural-thumb:hover img {
+  scale: 1.09;
+}
+
+/* Cards de textos, devaneios, arquivo e bilhetinhos */
+.post-card,
+.project-card,
+.archive-item,
+.comment-note {
+  transition:
+    translate 0.34s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.34s ease,
+    border-color 0.28s ease,
+    background-color 0.28s ease;
+}
+
+.post-card:hover {
+  translate: 0 -5px;
+  border-color: color-mix(in srgb, var(--crimson) 42%, var(--border));
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.09);
+}
+
+.post-card-cover {
+  transition: scale 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.post-card:hover .post-card-cover {
+  scale: 1.045;
+}
+
+.post-card .read-more,
+.project-card .project-link {
+  display: inline-block;
+  transition: translate 0.28s cubic-bezier(0.22, 1, 0.36, 1), color 0.2s ease;
+}
+
+.post-card:hover .read-more,
+.project-card:hover .project-link {
+  translate: 5px 0;
+}
+
+.project-card:hover {
+  translate: 0 -4px;
+  border-color: color-mix(in srgb, var(--crimson) 38%, var(--border));
+}
+
+.archive-item:hover {
+  translate: 6px 0;
+  border-color: color-mix(in srgb, var(--crimson) 38%, var(--border));
+}
+
+/* Micro-detalhes: selo 愛, botões, tema, estrelas e modo dono */
+.hanko-seal {
+  transition:
+    rotate 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+    scale 0.24s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.28s ease;
+}
+
+.brand:hover .hanko-seal {
+  rotate: -7deg;
+  scale: 1.06;
+  box-shadow: 0 6px 16px color-mix(in srgb, var(--crimson) 35%, transparent);
+}
+
+.hanko-seal:active {
+  scale: 0.92;
+  rotate: -2deg;
+}
+
+.btn,
+.pill,
+.btn-icon,
+.social-link {
+  transition:
+    translate 0.24s cubic-bezier(0.22, 1, 0.36, 1),
+    scale 0.16s ease,
+    background-color 0.22s ease,
+    border-color 0.22s ease,
+    color 0.22s ease,
+    box-shadow 0.24s ease;
+}
+
+.btn:hover,
+.social-link:hover {
+  translate: 0 -2px;
+}
+
+.btn:active,
+.pill:active,
+.btn-icon:active {
+  scale: 0.96;
+  translate: 0 0;
+}
+
+#themeIcon {
+  display: inline-block;
+  transition: rotate 0.45s cubic-bezier(0.22, 1, 0.36, 1), scale 0.25s ease;
+}
+
+#themeToggleBtn:hover #themeIcon {
+  rotate: 22deg;
+  scale: 1.12;
+}
+
+.footer-stars {
+  display: inline-block;
+  animation: asonozzTwinkle 3.8s ease-in-out infinite;
+}
+
+.footer-mark {
+  display: inline-block;
+  transition: rotate 0.3s ease, scale 0.3s ease;
+}
+
+.footer-brand-row:hover .footer-mark {
+  rotate: -8deg;
+  scale: 1.12;
+}
+
+.owner-dot {
+  animation: asonozzOwnerPulse 2.2s ease-out infinite;
+}
+
+/* Respeita quem prefere menos movimento no sistema */
+@media (prefers-reduced-motion: reduce) {
+  .cover-top-meta,
+  .cover-title,
+  .cover-tagline,
+  .cover-cta-row,
+  .cover-polaroids,
+  .cover-bottom,
+  .cover-watermark,
+  .scroll-line,
+  .view:not([hidden]),
+  .modal-backdrop:not([hidden]),
+  .modal-backdrop:not([hidden]) .modal-box,
+  .modal-backdrop:not([hidden]) .lightbox-box,
+  .footer-stars,
+  .owner-dot {
+    animation: none !important;
+  }
+
+  .mural-item,
+  .cover-polaroid,
+  .post-card,
+  .project-card,
+  .archive-item {
+    rotate: 0deg !important;
+    transition: none !important;
+  }
+}

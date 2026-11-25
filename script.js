@@ -132,6 +132,19 @@ function formatDate(isoDate) {
   return `${d} ${months[Number(m) - 1]} ${y}`;
 }
 
+function formatRelativeTime(unixSeconds) {
+  if (!unixSeconds) return "";
+  const diffSec = Math.max(0, Math.floor(Date.now() / 1000) - Number(unixSeconds));
+  if (diffSec < 60) return "agora há pouco";
+  const mins = Math.floor(diffSec / 60);
+  if (mins < 60) return `há ${mins} min`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `há ${hours}h`;
+  const days = Math.floor(hours / 24);
+  if (days === 1) return "ontem";
+  return `há ${days} dias`;
+}
+
 function estimateReadingTime(text = "") {
   const words = text.trim().split(/\s+/).filter(Boolean).length;
   const mins = Math.max(1, Math.ceil(words / 180));
@@ -194,6 +207,69 @@ function compressImageFile(file, maxWidth, callback) {
     img.src = e.target.result;
   };
   reader.readAsDataURL(file);
+}
+
+// === CARTÃO LAST.FM (OUVINDO AGORA / ÚLTIMA OUVIDA) ===
+async function fetchLastFmTrack() {
+  const card = document.getElementById("lastfmCard");
+  if (!card) return;
+
+  try {
+    const res = await fetch("/api/lastfm");
+    if (!res.ok) return;
+    const data = await res.json();
+
+    if (!data.configured || !data.track) {
+      card.hidden = true;
+      return;
+    }
+
+    const { track, profileUrl } = data;
+    const isPlaying = Boolean(track.nowPlaying);
+
+    card.classList.toggle("is-playing", isPlaying);
+    document.getElementById("lastfmStatusLabel").textContent = isPlaying ? "Ouvindo agora" : "Última ouvida";
+    document.getElementById("lastfmProfileLink").href = profileUrl || track.url;
+    document.getElementById("lastfmTrackLink").href = track.url || profileUrl;
+    document.getElementById("lastfmTrackName").textContent = track.name;
+    document.getElementById("lastfmArtistName").textContent = track.artist;
+
+    const metaParts = [];
+    if (isPlaying) {
+      metaParts.push("⋆ tocando no Spotify");
+    } else if (track.playedAt) {
+      metaParts.push(formatRelativeTime(track.playedAt));
+    }
+    if (track.album) {
+      metaParts.push(track.album);
+    }
+    document.getElementById("lastfmMeta").textContent = metaParts.join(" · ");
+
+    const coverEl = document.getElementById("lastfmCover");
+    const fallbackEl = document.getElementById("lastfmFallback");
+    if (track.cover) {
+      coverEl.src = track.cover;
+      coverEl.alt = `${track.name} — ${track.artist}`;
+      coverEl.hidden = false;
+      fallbackEl.hidden = true;
+    } else {
+      coverEl.hidden = true;
+      fallbackEl.hidden = false;
+    }
+
+    card.hidden = false;
+  } catch (err) {
+    console.error("Erro ao carregar Last.fm:", err);
+  }
+}
+
+function initLastFmWidget() {
+  fetchLastFmTrack();
+  setInterval(() => {
+    if (document.visibilityState === "visible") {
+      fetchLastFmTrack();
+    }
+  }, 45000);
 }
 
 // === NOTIFICAÇÕES PUSH (ONESIGNAL + VERCEL) ===
@@ -2432,3 +2508,4 @@ initScrollTelling();
 checkUrlHash();
 initFirebaseIfConfigured();
 initPushNotifications();
+initLastFmWidget();

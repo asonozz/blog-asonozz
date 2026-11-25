@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Great+Vibes&family=JetBrains+Mono:wght@400;500&family=Quicksand:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=8">
+  <link rel="stylesheet" href="style.css?v=9">
   <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
 </head>
 <body>
@@ -238,6 +238,32 @@
         <blockquote class="profile-quote" id="sidebarQuote"></blockquote>
 
         <div class="social-links" id="sidebarLinks"></div>
+      </div>
+
+      <!-- Cartão Last.fm (Ouvindo agora / Última ouvida) -->
+      <div class="paper-card compact-card music-card" id="lastfmCard" hidden>
+        <div class="music-head-row">
+          <div class="music-status-wrap">
+            <span class="music-eq" id="lastfmEq" aria-hidden="true">
+              <span></span><span></span><span></span>
+            </span>
+            <h3 class="card-label" id="lastfmStatusLabel">Última ouvida</h3>
+          </div>
+          <a class="text-link music-profile-link" id="lastfmProfileLink" href="https://www.last.fm/user/asonozz" target="_blank" rel="noopener noreferrer">last.fm ↗</a>
+        </div>
+
+        <a class="music-body" id="lastfmTrackLink" href="https://www.last.fm/user/asonozz" target="_blank" rel="noopener noreferrer">
+          <div class="vinyl-disc" id="lastfmVinyl">
+            <img id="lastfmCover" alt="" hidden>
+            <span class="vinyl-fallback" id="lastfmFallback">愛</span>
+            <span class="vinyl-center" aria-hidden="true"></span>
+          </div>
+          <div class="music-info">
+            <p class="music-track-name" id="lastfmTrackName"></p>
+            <p class="music-artist-name" id="lastfmArtistName"></p>
+            <span class="music-meta" id="lastfmMeta"></span>
+          </div>
+        </a>
       </div>
 
       <div class="paper-card compact-card">
@@ -626,6 +652,6 @@ madrugadas calmas"></textarea>
   <!-- Aviso flutuante (toast) -->
   <div class="site-toast" id="siteToast" role="status" aria-live="polite" hidden></div>
 
-  <script src="script.js?v=8"></script>
+  <script src="script.js?v=9"></script>
 </body>
 </html>

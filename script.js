@@ -905,6 +905,41 @@ function openPostDetail(postId, shouldSwitch = true) {
 }
 
 // === GERADOR DE CARD PARA STORIES / FEED / QUADRADO ===
+async function getSiteCardFonts() {
+  const brandEl = document.querySelector(".brand-name") || document.querySelector(".cover-title") || document.body;
+  const titleEl = document.querySelector(".post-detail-title") || document.querySelector(".post-title") || document.querySelector(".cover-title") || document.body;
+  const bodyEl = document.querySelector(".post-body p") || document.querySelector(".post-excerpt") || document.body;
+  const monoEl = document.querySelector(".post-share-label") || document.querySelector(".post-date") || document.querySelector(".cover-eyebrow") || document.body;
+
+  const brandStyle = getComputedStyle(brandEl);
+  const titleStyle = getComputedStyle(titleEl);
+  const bodyStyle = getComputedStyle(bodyEl);
+  const monoStyle = getComputedStyle(monoEl);
+
+  const brandFamily = brandStyle.fontFamily || "'Coolvetica', 'Quicksand', sans-serif";
+  const brandWeight = brandStyle.fontWeight || "400";
+  const titleFamily = titleStyle.fontFamily || "'Coolvetica', 'Quicksand', sans-serif";
+  const titleWeight = titleStyle.fontWeight || "400";
+  const bodyFamily = bodyStyle.fontFamily || "'Quicksand', sans-serif";
+  const bodyWeight = bodyStyle.fontWeight || "500";
+  const monoFamily = monoStyle.fontFamily || "'JetBrains Mono', monospace";
+
+  if (document.fonts) {
+    try {
+      await Promise.allSettled([
+        document.fonts.load(`${brandWeight} 38px ${brandFamily}`),
+        document.fonts.load(`${titleWeight} 64px ${titleFamily}`),
+        document.fonts.load(`${bodyWeight} 32px ${bodyFamily}`),
+        document.fonts.load(`500 22px ${monoFamily}`),
+        document.fonts.load(`600 24px ${monoFamily}`),
+        document.fonts.ready
+      ]);
+    } catch {}
+  }
+
+  return { brandFamily, brandWeight, titleFamily, titleWeight, bodyFamily, bodyWeight, monoFamily };
+}
+
 function tryLoadImg(url, useCors) {
   return new Promise(resolve => {
     const img = new Image();
@@ -1015,7 +1050,7 @@ function wrapCanvasText(ctx, text, maxWidth, maxLines) {
   return lines;
 }
 
-function computeAdaptiveTypography(ctx, title, excerpt, maxWidth, totalHeight, format) {
+function computeAdaptiveTypography(ctx, title, excerpt, maxWidth, totalHeight, format, fonts) {
   const isStory = format === "story";
   const isSquare = format === "square";
 
@@ -1036,7 +1071,7 @@ function computeAdaptiveTypography(ctx, title, excerpt, maxWidth, totalHeight, f
   while (titleSize >= minTitleSize) {
     titleLineH = Math.round(titleSize * 1.16);
     const maxTLines = Math.max(1, Math.min(4, Math.floor(titleBudget / titleLineH)));
-    ctx.font = `700 ${titleSize}px 'Coolvetica', 'Quicksand', sans-serif`;
+    ctx.font = `${fonts.titleWeight} ${titleSize}px ${fonts.titleFamily}`;
     titleLines = wrapCanvasText(ctx, title, maxWidth, maxTLines);
     const fullTitleFit = titleLines.join(" ").indexOf("…") === -1;
     const usedH = titleLines.length * titleLineH;
@@ -1060,7 +1095,7 @@ function computeAdaptiveTypography(ctx, title, excerpt, maxWidth, totalHeight, f
       bodySize -= 2;
     }
 
-    ctx.font = `500 ${bodySize}px 'Coolvetica', 'Quicksand', sans-serif`;
+    ctx.font = `${fonts.bodyWeight} ${bodySize}px ${fonts.bodyFamily}`;
     bodyLineH = Math.round(bodySize * 1.38);
     let maxBLines = Math.max(1, Math.floor(bodyBudget / bodyLineH));
     bodyLines = wrapCanvasText(ctx, excerpt, maxWidth, maxBLines);
@@ -1072,7 +1107,7 @@ function computeAdaptiveTypography(ctx, title, excerpt, maxWidth, totalHeight, f
     ) {
       bodySize += 2;
       bodyLineH = Math.round(bodySize * 1.38);
-      ctx.font = `500 ${bodySize}px 'Coolvetica', 'Quicksand', sans-serif`;
+      ctx.font = `${fonts.bodyWeight} ${bodySize}px ${fonts.bodyFamily}`;
       maxBLines = Math.max(1, Math.floor(bodyBudget / bodyLineH));
       bodyLines = wrapCanvasText(ctx, excerpt, maxWidth, maxBLines);
     }
@@ -1110,9 +1145,7 @@ async function renderStoryCard(post) {
   canvas.height = H;
   canvas.style.aspectRatio = `${W} / ${H}`;
 
-  if (document.fonts && document.fonts.ready) {
-    try { await document.fonts.ready; } catch {}
-  }
+  const fonts = await getSiteCardFonts();
 
   const isDark = theme === "dark";
   const palette = isDark
@@ -1201,11 +1234,11 @@ async function renderStoryCard(post) {
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
   ctx.fillStyle = palette.text;
-  ctx.font = `700 ${format === "story" ? 38 : 34}px 'Coolvetica', 'Quicksand', sans-serif`;
+  ctx.font = `${fonts.brandWeight} ${format === "story" ? 38 : 34}px ${fonts.brandFamily}`;
   ctx.fillText(state.profile.name || "asonozz.", contentX + sealSize + 18, cursorY + Math.round(sealSize * 0.48));
 
   ctx.fillStyle = palette.muted;
-  ctx.font = `500 ${format === "story" ? 22 : 19}px 'JetBrains Mono', monospace`;
+  ctx.font = `500 ${format === "story" ? 22 : 19}px ${fonts.monoFamily}`;
   ctx.fillText("⋆⭒˚.⋆ novo texto no caderno", contentX + sealSize + 18, cursorY + Math.round(sealSize * 0.90));
 
   cursorY += headerH;
@@ -1284,7 +1317,7 @@ async function renderStoryCard(post) {
   const dateText = formatDate(post.date);
   const catText = (post.category || "pensamentos").toUpperCase();
 
-  ctx.font = `600 ${metaFontSize}px 'JetBrains Mono', monospace`;
+  ctx.font = `600 ${metaFontSize}px ${fonts.monoFamily}`;
   const dateW = ctx.measureText(dateText).width + 34;
   const catW = ctx.measureText(catText).width + 34;
 
@@ -1312,11 +1345,11 @@ async function renderStoryCard(post) {
     .trim();
 
   const textZoneH = Math.max(80, footerY - cursorY - 16);
-  const typo = computeAdaptiveTypography(ctx, post.title, cleanExcerpt, contentW, textZoneH, format);
+  const typo = computeAdaptiveTypography(ctx, post.title, cleanExcerpt, contentW, textZoneH, format, fonts);
 
   ctx.textBaseline = "top";
   ctx.fillStyle = palette.text;
-  ctx.font = `700 ${typo.titleSize}px 'Coolvetica', 'Quicksand', sans-serif`;
+  ctx.font = `${fonts.titleWeight} ${typo.titleSize}px ${fonts.titleFamily}`;
   for (const line of typo.titleLines) {
     ctx.fillText(line, contentX, cursorY);
     cursorY += typo.titleLineH;
@@ -1325,7 +1358,7 @@ async function renderStoryCard(post) {
   if (typo.bodyLines.length) {
     cursorY += typo.gapBetween;
     ctx.fillStyle = palette.muted;
-    ctx.font = `500 ${typo.bodySize}px 'Coolvetica', 'Quicksand', sans-serif`;
+    ctx.font = `${fonts.bodyWeight} ${typo.bodySize}px ${fonts.bodyFamily}`;
     for (const line of typo.bodyLines) {
       ctx.fillText(line, contentX, cursorY);
       cursorY += typo.bodyLineH;
@@ -1341,14 +1374,14 @@ async function renderStoryCard(post) {
   ctx.stroke();
 
   ctx.fillStyle = palette.crimson;
-  ctx.font = `600 ${format === "square" ? 21 : 24}px 'JetBrains Mono', monospace`;
+  ctx.font = `600 ${format === "square" ? 21 : 24}px ${fonts.monoFamily}`;
   const ctaLine = format === "story"
     ? "toque no link abaixo para ler ↓"
     : "leia o texto completo no blog →";
   ctx.fillText(ctaLine, contentX, footerY + (format === "square" ? 40 : 48));
 
   ctx.fillStyle = palette.muted;
-  ctx.font = `500 ${format === "square" ? 19 : 21}px 'JetBrains Mono', monospace`;
+  ctx.font = `500 ${format === "square" ? 19 : 21}px ${fonts.monoFamily}`;
   const hostDisplay = window.location.host || "asonozz.vercel.app";
   ctx.fillText(`${state.profile.handle || "@asonozz"}  ·  ${hostDisplay}`, contentX, footerY + (format === "square" ? 70 : 82));
 }

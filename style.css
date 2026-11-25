@@ -1862,3 +1862,22 @@ body.is-owner .owner-only-flex {
   accent-color: var(--crimson);
   cursor: pointer;
 }
+
+/* Garantia definitiva: esconde botões do dono para visitantes */
+.owner-only,
+.owner-only-block,
+.owner-only-flex {
+  display: none !important;
+}
+
+body.is-owner .owner-only {
+  display: inline-flex !important;
+}
+
+body.is-owner .owner-only-block {
+  display: block !important;
+}
+
+body.is-owner .owner-only-flex {
+  display: flex !important;
+}

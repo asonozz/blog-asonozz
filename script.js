@@ -173,6 +173,14 @@ let state = {
 };
 
 // Utilitários seguros
+function getLocalTodayIso() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
 function loadFromStorage(key, fallback) {
   try {
     const raw = localStorage.getItem(key);
@@ -465,7 +473,6 @@ function renderProfile() {
     .map(item => `<a class="social-link" href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">${item.label}</a>`)
     .join("");
 
-  // Cartão "Coisas que eu curto" (editável)
   const likesCard = document.getElementById("sidebarLikesCard");
   const likesTitleEl = document.getElementById("sidebarLikesTitle");
   const likesListEl = document.getElementById("sidebarLikesList");
@@ -505,6 +512,8 @@ function renderPosts() {
     .sort((a, b) => {
       const pinDiff = (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0);
       if (pinDiff !== 0) return pinDiff;
+      const dateDiff = String(b.date || "").localeCompare(String(a.date || ""));
+      if (dateDiff !== 0) return dateDiff;
       return (b.createdAt || 0) - (a.createdAt || 0);
     });
 
@@ -525,8 +534,8 @@ function renderPosts() {
           <div class="post-card-body">
             <div class="post-meta">
               ${post.pinned ? `<span class="post-pinned-badge">★ fixado</span>` : ""}
+              <span class="post-date">${formatDate(post.date)}</span>
               <span class="post-cat">${escapeHtml(post.category)}</span>
-              <span>${formatDate(post.date)}</span>
               <span>·</span>
               <span>${estimateReadingTime(post.content)}</span>
             </div>
@@ -611,8 +620,8 @@ function openPostDetail(postId, shouldSwitch = true) {
   detailEl.innerHTML = `
     <div class="post-meta">
       ${post.pinned ? `<span class="post-pinned-badge">★ fixado</span>` : ""}
+      <span class="post-date">${formatDate(post.date)}</span>
       <span class="post-cat">${escapeHtml(post.category)}</span>
-      <span>${formatDate(post.date)}</span>
       <span>·</span>
       <span>${estimateReadingTime(post.content)}</span>
     </div>
@@ -709,7 +718,7 @@ async function replyToComment(commentId) {
   const answer = prompt(`Responder bilhetinho de ${comment.author}:`, comment.reply || "");
   if (answer === null) return;
   comment.reply = answer.trim();
-  comment.replyDate = new Date().toISOString().slice(0, 10);
+  comment.replyDate = getLocalTodayIso();
   comment.approved = true;
   await persistDoc("comments", comment);
   syncOwnerUI();
@@ -774,7 +783,13 @@ function renderArchive() {
     return;
   }
 
-  container.innerHTML = state.posts
+  const ordered = [...state.posts].sort((a, b) => {
+    const dateDiff = String(b.date || "").localeCompare(String(a.date || ""));
+    if (dateDiff !== 0) return dateDiff;
+    return (b.createdAt || 0) - (a.createdAt || 0);
+  });
+
+  container.innerHTML = ordered
     .map(post => `
       <div class="archive-item" data-post-id="${escapeHtml(post.id)}">
         <span class="archive-item-title">${post.pinned ? "★ " : ""}${escapeHtml(post.title)}</span>
@@ -894,6 +909,9 @@ function openPostModal(post = null) {
   document.getElementById("postCategoryInput").value = post ? post.category : "pensamentos";
   document.getElementById("postContentInput").value = post ? post.content : "";
   document.getElementById("postImageFileInput").value = "";
+
+  const dateInput = document.getElementById("postDateInput");
+  if (dateInput) dateInput.value = post?.date || getLocalTodayIso();
 
   const pinInput = document.getElementById("postPinnedInput");
   if (pinInput) pinInput.checked = Boolean(post?.pinned);
@@ -1183,7 +1201,7 @@ function bindEvents() {
       postId: state.currentPostId,
       author,
       text,
-      date: new Date().toISOString().slice(0, 10),
+      date: getLocalTodayIso(),
       createdAt: Date.now(),
       approved: state.isOwner,
       reply: "",
@@ -1236,6 +1254,7 @@ function bindEvents() {
     const id = document.getElementById("postIdInput").value;
     const title = document.getElementById("postTitleInput").value.trim();
     const category = document.getElementById("postCategoryInput").value;
+    const date = document.getElementById("postDateInput")?.value || getLocalTodayIso();
     const content = document.getElementById("postContentInput").value.trim();
     const pinned = Boolean(document.getElementById("postPinnedInput")?.checked);
     const image = state.tempPostImage;
@@ -1244,14 +1263,14 @@ function bindEvents() {
     let savedPost;
     if (id) {
       const existing = state.posts.find(p => p.id === id);
-      savedPost = { ...existing, title, category, content, image, pinned };
+      savedPost = { ...existing, title, category, date, content, image, pinned };
       state.posts = state.posts.map(p => (p.id === id ? savedPost : p));
     } else {
       savedPost = {
         id: "post-" + Date.now(),
         title,
         category,
-        date: new Date().toISOString().slice(0, 10),
+        date,
         createdAt: Date.now(),
         pinned,
         image,
@@ -1307,7 +1326,7 @@ function bindEvents() {
       id: "photo-" + Date.now(),
       url: state.tempMuralPhoto,
       caption: document.getElementById("photoCaptionInput").value.trim(),
-      date: new Date().toISOString().slice(0, 10),
+      date: getLocalTodayIso(),
       createdAt: Date.now()
     };
 

@@ -1,4 +1,4 @@
-// === CONFIGURAÇÃO DO FIREBASE (preencha quando criarmos seu projeto) ===
+// === CONFIGURAÇÃO DO FIREBASE ===
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyCEqUzJpfX4l4hSjHpOUr9n2o8F4anRsVA",
   authDomain: "blog-asonozz.firebaseapp.com",
@@ -40,6 +40,9 @@ const DEFAULT_PROFILE = {
   bio: "building things. learning along the way. um pequeno quarto na internet para guardar textos, fotos, tentativas e ideias que começaram com um 'e se eu tentasse isso?'.",
   quote: "Look at the light.",
   avatar: "",
+  likesTitle: "Coisas que eu curto",
+  likes: ["jogos", "código", "madrugadas calmas", "criar coisas aleatórias"],
+  aboutExtra: "Este espaço nasceu para guardar ideias, textos, polaroids e experimentos sem a pressa das redes sociais. Tudo aqui é feito à mão de propósito: um pequeno quarto na internet que muda conforme eu mudo.",
   links: {
     github: "https://github.com/asonozz",
     instagram: "https://instagram.com/asonozz",
@@ -54,6 +57,7 @@ const DEFAULT_POSTS = [
     title: "Um pequeno quarto na internet",
     category: "pensamentos",
     date: "2026-11-24",
+    pinned: false,
     image: "",
     content:
       "Nem todo projeto chega ao destino final, mas cada um deles deixa alguma coisa para trás.\n\nCriei este caderno para fugir do barulho das redes sociais. Aqui não tem algoritmo nem contagem de curtidas — só textos, polaroids no mural e ideias soltas que aparecem no meio da madrugada.\n\n> \"e se eu tentasse isso?\"\n\nSinta-se em casa."
@@ -63,6 +67,7 @@ const DEFAULT_POSTS = [
     title: "Construindo meu espaço do zero",
     category: "código",
     date: "2026-11-22",
+    pinned: false,
     image: "",
     content:
       "Escolhi manter tudo em HTML, CSS e JavaScript puro: leve, rápido e completamente meu. O vermelho carmesim sobre o papel branco nasceu da minha identidade visual — direto, calmo e cheio de detalhes pequenos.\n\nA ideia é ir mexendo, colando novas fotos e transformando este canto junto comigo."
@@ -72,6 +77,7 @@ const DEFAULT_POSTS = [
     title: "Coisas que só fazem sentido de madrugada",
     category: "devaneios",
     date: "2026-11-18",
+    pinned: false,
     image: "",
     content:
       "Existe um silêncio diferente depois da meia-noite. A tela acesa, nenhuma pressa e a vontade de experimentar qualquer projeto aleatório sem precisar explicar para ninguém.\n\nEste blog existe justamente para guardar esses fragmentos antes que sumam de manhã."
@@ -150,7 +156,7 @@ let cloud = {
 };
 
 let state = {
-  profile: loadFromStorage(STORAGE_KEYS.profile, DEFAULT_PROFILE),
+  profile: { ...DEFAULT_PROFILE, ...loadFromStorage(STORAGE_KEYS.profile, DEFAULT_PROFILE) },
   posts: loadFromStorage(STORAGE_KEYS.posts, DEFAULT_POSTS),
   photos: loadFromStorage(STORAGE_KEYS.photos, DEFAULT_PHOTOS),
   projects: loadFromStorage(STORAGE_KEYS.projects, DEFAULT_PROJECTS),
@@ -248,6 +254,7 @@ async function initFirebaseIfConfigured() {
   if (!FIREBASE_CONFIG.apiKey || !FIREBASE_CONFIG.projectId) {
     state.isOwner = localStorage.getItem(STORAGE_KEYS.demoOwner) === "true";
     syncOwnerUI();
+    checkAdminHash();
     return;
   }
 
@@ -269,8 +276,10 @@ async function initFirebaseIfConfigured() {
 
     cloud.fns.onAuthStateChanged(cloud.auth, async user => {
       state.isOwner = Boolean(user);
+      if (user) closeLoginModal();
       syncOwnerUI();
       await loadAllFromCloud();
+      checkAdminHash();
     });
 
     await loadAllFromCloud();
@@ -285,7 +294,9 @@ async function loadAllFromCloud() {
 
   try {
     const profileSnap = await getDoc(doc(cloud.db, "site", "profile"));
-    if (profileSnap.exists()) state.profile = profileSnap.data();
+    if (profileSnap.exists()) {
+      state.profile = { ...DEFAULT_PROFILE, ...profileSnap.data() };
+    }
 
     const [postsSnap, photosSnap, projSnap, commSnap] = await Promise.all([
       getDocs(collection(cloud.db, "posts")),
@@ -346,10 +357,16 @@ function syncOwnerUI() {
   const pendingCount = state.comments.filter(c => !c.approved).length;
   const label = pendingCount === 1 ? "1 bilhetinho pendente" : `${pendingCount} bilhetinhos pendentes`;
   document.getElementById("pendingCountText").textContent = label;
-  document.getElementById("ownerAccessLink").textContent = state.isOwner ? "logado como @asonozz" : "acesso do dono";
 
   if (state.activeView === "post" && state.currentPostId) {
     renderCommentsForPost(state.currentPostId);
+  }
+}
+
+function checkAdminHash() {
+  if (window.location.hash === "#admin" && !state.isOwner) {
+    openLoginModal();
+    history.replaceState(null, "", window.location.pathname + window.location.search);
   }
 }
 
@@ -448,6 +465,24 @@ function renderProfile() {
     .map(item => `<a class="social-link" href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">${item.label}</a>`)
     .join("");
 
+  // Cartão "Coisas que eu curto" (editável)
+  const likesCard = document.getElementById("sidebarLikesCard");
+  const likesTitleEl = document.getElementById("sidebarLikesTitle");
+  const likesListEl = document.getElementById("sidebarLikesList");
+  const likesItems = Array.isArray(p.likes) ? p.likes : DEFAULT_PROFILE.likes;
+
+  if (likesCard && likesTitleEl && likesListEl) {
+    if (!likesItems.length) {
+      likesCard.hidden = true;
+    } else {
+      likesCard.hidden = false;
+      likesTitleEl.textContent = p.likesTitle || "Coisas que eu curto";
+      likesListEl.innerHTML = likesItems
+        .map(item => `<li>${escapeHtml(item)}</li>`)
+        .join("");
+    }
+  }
+
   renderAbout();
   renderCoverStats();
 }
@@ -456,16 +491,22 @@ function renderPosts() {
   const container = document.getElementById("postsList");
   const emptyState = document.getElementById("emptyState");
 
-  const filtered = state.posts.filter(post => {
-    const matchesCat = state.activeCategory === "todos" || post.category === state.activeCategory;
-    const q = state.searchQuery.toLowerCase();
-    const matchesQuery =
-      !q ||
-      post.title.toLowerCase().includes(q) ||
-      post.content.toLowerCase().includes(q) ||
-      post.category.toLowerCase().includes(q);
-    return matchesCat && matchesQuery;
-  });
+  const filtered = state.posts
+    .filter(post => {
+      const matchesCat = state.activeCategory === "todos" || post.category === state.activeCategory;
+      const q = state.searchQuery.toLowerCase();
+      const matchesQuery =
+        !q ||
+        post.title.toLowerCase().includes(q) ||
+        post.content.toLowerCase().includes(q) ||
+        post.category.toLowerCase().includes(q);
+      return matchesCat && matchesQuery;
+    })
+    .sort((a, b) => {
+      const pinDiff = (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0);
+      if (pinDiff !== 0) return pinDiff;
+      return (b.createdAt || 0) - (a.createdAt || 0);
+    });
 
   if (!filtered.length) {
     container.innerHTML = "";
@@ -479,10 +520,11 @@ function renderPosts() {
       const approvedCount = state.comments.filter(c => c.postId === post.id && c.approved).length;
       const countText = approvedCount === 1 ? "1 bilhetinho" : `${approvedCount} bilhetinhos`;
       return `
-        <article class="post-card" data-post-id="${escapeHtml(post.id)}">
+        <article class="post-card ${post.pinned ? "is-pinned" : ""}" data-post-id="${escapeHtml(post.id)}">
           ${post.image ? `<div class="post-card-cover-wrap"><img class="post-card-cover" src="${escapeHtml(post.image)}" alt="${escapeHtml(post.title)}"></div>` : ""}
           <div class="post-card-body">
             <div class="post-meta">
+              ${post.pinned ? `<span class="post-pinned-badge">★ fixado</span>` : ""}
               <span class="post-cat">${escapeHtml(post.category)}</span>
               <span>${formatDate(post.date)}</span>
               <span>·</span>
@@ -568,6 +610,7 @@ function openPostDetail(postId, shouldSwitch = true) {
   const detailEl = document.getElementById("postDetailContent");
   detailEl.innerHTML = `
     <div class="post-meta">
+      ${post.pinned ? `<span class="post-pinned-badge">★ fixado</span>` : ""}
       <span class="post-cat">${escapeHtml(post.category)}</span>
       <span>${formatDate(post.date)}</span>
       <span>·</span>
@@ -577,17 +620,29 @@ function openPostDetail(postId, shouldSwitch = true) {
     ${post.image ? `<img class="post-detail-cover" src="${escapeHtml(post.image)}" alt="${escapeHtml(post.title)}">` : ""}
     <div class="post-body">${formatPostContent(post.content)}</div>
     <div class="post-detail-actions owner-only-flex">
+      <button class="btn btn-outline btn-sm" id="togglePinPostBtn">${post.pinned ? "Desafixar" : "★ Fixar no topo"}</button>
       <button class="btn btn-outline btn-sm" id="editCurrentPostBtn">Editar texto</button>
       <button class="btn btn-danger btn-sm" id="deleteCurrentPostBtn">Excluir</button>
     </div>
   `;
 
+  document.getElementById("togglePinPostBtn").addEventListener("click", () => togglePinPost(post.id));
   document.getElementById("editCurrentPostBtn").addEventListener("click", () => openPostModal(post));
   document.getElementById("deleteCurrentPostBtn").addEventListener("click", () => deletePost(post.id));
   document.getElementById("commentFeedback").textContent = "";
 
   renderCommentsForPost(postId);
   if (shouldSwitch) switchView("post");
+}
+
+async function togglePinPost(postId) {
+  if (!state.isOwner) return;
+  const post = state.posts.find(p => p.id === postId);
+  if (!post) return;
+  post.pinned = !post.pinned;
+  await persistDoc("posts", post);
+  renderPosts();
+  openPostDetail(postId, false);
 }
 
 function renderCommentsForPost(postId) {
@@ -722,7 +777,7 @@ function renderArchive() {
   container.innerHTML = state.posts
     .map(post => `
       <div class="archive-item" data-post-id="${escapeHtml(post.id)}">
-        <span class="archive-item-title">${escapeHtml(post.title)}</span>
+        <span class="archive-item-title">${post.pinned ? "★ " : ""}${escapeHtml(post.title)}</span>
         <span class="archive-item-date">${formatDate(post.date)} · ${escapeHtml(post.category)}</span>
       </div>
     `)
@@ -771,11 +826,12 @@ function renderProjects() {
 
 function renderAbout() {
   const p = state.profile;
+  const extra = p.aboutExtra !== undefined ? p.aboutExtra : DEFAULT_PROFILE.aboutExtra;
   document.getElementById("aboutContent").innerHTML = `
     <span class="section-kicker">⋆˚࿔ quem escreve</span>
     <h2>Sobre ${escapeHtml(p.name)}</h2>
     <p>${escapeHtml(p.bio)}</p>
-    <p>Este espaço nasceu para guardar ideias, textos, polaroids e experimentos sem a pressa das redes sociais. Tudo aqui é feito à mão de propósito: um pequeno quarto na internet que muda conforme eu mudo.</p>
+    ${extra && extra.trim() ? `<p>${escapeHtml(extra).replaceAll("\n", "<br>")}</p>` : ""}
     ${p.quote ? `<blockquote class="profile-quote">"${escapeHtml(p.quote)}"</blockquote>` : ""}
   `;
 }
@@ -838,6 +894,9 @@ function openPostModal(post = null) {
   document.getElementById("postCategoryInput").value = post ? post.category : "pensamentos";
   document.getElementById("postContentInput").value = post ? post.content : "";
   document.getElementById("postImageFileInput").value = "";
+
+  const pinInput = document.getElementById("postPinnedInput");
+  if (pinInput) pinInput.checked = Boolean(post?.pinned);
 
   const isDataUrl = post?.image?.startsWith("data:");
   document.getElementById("postImageUrlInput").value = post?.image && !isDataUrl ? post.image : "";
@@ -921,6 +980,18 @@ function openProfileModal() {
   document.getElementById("profileQuoteInput").value = p.quote || "";
   document.getElementById("profileAvatarFileInput").value = "";
 
+  const likesTitleInput = document.getElementById("profileLikesTitleInput");
+  const likesInput = document.getElementById("profileLikesInput");
+  const aboutExtraInput = document.getElementById("profileAboutExtraInput");
+  if (likesTitleInput) likesTitleInput.value = p.likesTitle || "Coisas que eu curto";
+  if (likesInput) {
+    const items = Array.isArray(p.likes) ? p.likes : DEFAULT_PROFILE.likes;
+    likesInput.value = items.join("\n");
+  }
+  if (aboutExtraInput) {
+    aboutExtraInput.value = p.aboutExtra !== undefined ? p.aboutExtra : DEFAULT_PROFILE.aboutExtra;
+  }
+
   const isDataUrl = p.avatar?.startsWith("data:");
   document.getElementById("profileAvatarUrlInput").value = p.avatar && !isDataUrl ? p.avatar : "";
   state.tempProfileAvatar = p.avatar || "";
@@ -961,7 +1032,7 @@ function importBackup(file) {
     try {
       const parsed = JSON.parse(e.target.result);
       if (parsed.profile) {
-        state.profile = parsed.profile;
+        state.profile = { ...DEFAULT_PROFILE, ...parsed.profile };
         saveToStorage(STORAGE_KEYS.profile, state.profile);
       }
       if (Array.isArray(parsed.posts)) {
@@ -992,7 +1063,7 @@ function importBackup(file) {
 
 // Eventos
 function bindEvents() {
-  // Atalho secreto: 3 cliques rápidos no selo 愛 abrem o login do dono
+  // Atalho secreto 1: 3 cliques rápidos no selo 愛
   let sealClicks = 0;
   let sealTimer = null;
   document.getElementById("headerSeal").addEventListener("click", e => {
@@ -1002,20 +1073,14 @@ function bindEvents() {
       e.preventDefault();
       e.stopPropagation();
       sealClicks = 0;
-      openLoginModal();
+      if (!state.isOwner) openLoginModal();
       return;
     }
     sealTimer = setTimeout(() => (sealClicks = 0), 650);
   });
 
-  document.getElementById("ownerAccessLink").addEventListener("click", () => {
-    if (state.isOwner) {
-      renderModerationModal();
-      document.getElementById("moderationModal").hidden = false;
-    } else {
-      openLoginModal();
-    }
-  });
+  // Atalho secreto 2: /#admin na URL
+  window.addEventListener("hashchange", checkAdminHash);
 
   // Login e Logout
   document.getElementById("closeLoginModalBtn").addEventListener("click", closeLoginModal);
@@ -1105,7 +1170,7 @@ function bindEvents() {
     });
   });
 
-  // Enviar Bilhetinho (Visitante ou Dono)
+  // Enviar Bilhetinho
   document.getElementById("commentForm").addEventListener("submit", async e => {
     e.preventDefault();
     if (!state.currentPostId) return;
@@ -1172,13 +1237,14 @@ function bindEvents() {
     const title = document.getElementById("postTitleInput").value.trim();
     const category = document.getElementById("postCategoryInput").value;
     const content = document.getElementById("postContentInput").value.trim();
+    const pinned = Boolean(document.getElementById("postPinnedInput")?.checked);
     const image = state.tempPostImage;
     if (!title || !content) return;
 
     let savedPost;
     if (id) {
       const existing = state.posts.find(p => p.id === id);
-      savedPost = { ...existing, title, category, content, image };
+      savedPost = { ...existing, title, category, content, image, pinned };
       state.posts = state.posts.map(p => (p.id === id ? savedPost : p));
     } else {
       savedPost = {
@@ -1187,6 +1253,7 @@ function bindEvents() {
         category,
         date: new Date().toISOString().slice(0, 10),
         createdAt: Date.now(),
+        pinned,
         image,
         content
       };
@@ -1310,6 +1377,18 @@ function bindEvents() {
   document.getElementById("profileForm").addEventListener("submit", async e => {
     e.preventDefault();
     if (!state.isOwner) return;
+
+    const likesTitleInput = document.getElementById("profileLikesTitleInput");
+    const likesInput = document.getElementById("profileLikesInput");
+    const aboutExtraInput = document.getElementById("profileAboutExtraInput");
+
+    const parsedLikes = likesInput
+      ? likesInput.value
+          .split("\n")
+          .map(line => line.trim())
+          .filter(Boolean)
+      : state.profile.likes;
+
     state.profile = {
       name: document.getElementById("profileNameInput").value.trim() || "asonozz.",
       handle: document.getElementById("profileHandleInput").value.trim() || "@asonozz",
@@ -1317,6 +1396,9 @@ function bindEvents() {
       bio: document.getElementById("profileBioInput").value.trim(),
       quote: document.getElementById("profileQuoteInput").value.trim(),
       avatar: state.tempProfileAvatar,
+      likesTitle: likesTitleInput ? likesTitleInput.value.trim() || "Coisas que eu curto" : state.profile.likesTitle,
+      likes: parsedLikes,
+      aboutExtra: aboutExtraInput ? aboutExtraInput.value.trim() : state.profile.aboutExtra,
       links: {
         github: document.getElementById("profileGithubInput").value.trim(),
         instagram: document.getElementById("profileInstagramInput").value.trim(),

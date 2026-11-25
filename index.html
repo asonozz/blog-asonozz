@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
- <title>asonozz. — meu cantinho 愛</title>
-<link rel="icon" type="image/png" href="./favicon.png">
+  <title>asonozz. — um pequeno quarto na internet</title>
+  <link rel="icon" type="image/png" href="./favicon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Great+Vibes&family=JetBrains+Mono:wght@400;500&family=Quicksand:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -237,26 +237,9 @@
         <div class="sidebar-mural-grid" id="sidebarMuralPreview"></div>
       </div>
 
-      <div class="paper-card compact-card">
-        <h3 class="card-label">Coisas que eu curto</h3>
-        <ul class="tag-list">
-          <li>jogos</li>
-          <li>código</li>
-          <li>madrugadas calmas</li>
-          <li>criar coisas aleatórias</li>
-        </ul>
-      </div>
-
-      <div class="paper-card compact-card">
-        <h3 class="card-label">Ferramentas</h3>
-        <div class="stack-badges">
-          <span>Python</span>
-          <span>Java</span>
-          <span>HTML</span>
-          <span>CSS</span>
-          <span>JS</span>
-          <span>Git</span>
-        </div>
+      <div class="paper-card compact-card" id="sidebarLikesCard">
+        <h3 class="card-label" id="sidebarLikesTitle">Coisas que eu curto</h3>
+        <ul class="tag-list" id="sidebarLikesList"></ul>
       </div>
 
       <div class="paper-card compact-card backup-card owner-only-block" id="backupCard">
@@ -281,7 +264,6 @@
         <p id="footerText">asonozz. — Look at the light.</p>
         <span class="footer-stars">⋆⭒˚.⋆</span>
       </div>
-      <button class="owner-link" id="ownerAccessLink">acesso do dono</button>
     </div>
   </footer>
 
@@ -368,6 +350,11 @@
           <label for="postContentInput">Texto</label>
           <textarea id="postContentInput" rows="8" required placeholder="Escreva livremente... Dica: comece uma linha com > para criar uma citação destacada."></textarea>
         </div>
+
+        <label class="checkbox-inline">
+          <input type="checkbox" id="postPinnedInput">
+          Fixar este texto no topo do caderno
+        </label>
 
         <div class="modal-footer">
           <button type="button" class="btn btn-outline" id="cancelPostBtn">Cancelar</button>
@@ -507,6 +494,23 @@
             <input type="file" id="profileAvatarFileInput" accept="image/*">
             <button type="button" class="btn btn-outline btn-sm" id="clearAvatarBtn">Usar selo 愛</button>
           </div>
+        </div>
+
+        <div class="form-group">
+          <label for="profileLikesTitleInput">Título da lista na barra lateral</label>
+          <input type="text" id="profileLikesTitleInput" placeholder="Coisas que eu curto">
+        </div>
+
+        <div class="form-group">
+          <label for="profileLikesInput">Itens da lista (um por linha)</label>
+          <textarea id="profileLikesInput" rows="4" placeholder="jogos
+código
+madrugadas calmas"></textarea>
+        </div>
+
+        <div class="form-group">
+          <label for="profileAboutExtraInput">Texto extra da aba Sobre</label>
+          <textarea id="profileAboutExtraInput" rows="3" placeholder="Conte um pouco mais sobre este espaço..."></textarea>
         </div>
 
         <div class="form-row">

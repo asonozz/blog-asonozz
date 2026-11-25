@@ -8,6 +8,8 @@ const FIREBASE_CONFIG = {
   appId: "1:7978098749:web:bd3a2508b094aa6d43a394"
 };
 
+const HAS_FIREBASE = Boolean(FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.projectId);
+
 const STORAGE_KEYS = {
   profile: "asonozz_v3_profile",
   posts: "asonozz_v3_posts",
@@ -17,21 +19,6 @@ const STORAGE_KEYS = {
   theme: "asonozz_v3_theme",
   demoOwner: "asonozz_v3_demo_owner"
 };
-
-function createStarterArt(bg, accent, mainSymbol, label, sublabel, ratio = "4/5") {
-  const height = ratio === "4/5" ? 500 : 400;
-  const svg = [
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 ${height}">`,
-    `<rect width="400" height="${height}" fill="${bg}"/>`,
-    `<rect x="18" y="18" width="364" height="${height - 36}" fill="none" stroke="${accent}" stroke-opacity="0.28" stroke-dasharray="6 6" stroke-width="1.5"/>`,
-    `<circle cx="200" cy="${Math.round(height * 0.44)}" r="72" fill="${accent}" fill-opacity="0.13"/>`,
-    `<text x="200" y="${Math.round(height * 0.49)}" text-anchor="middle" fill="${accent}" font-family="serif" font-weight="700" font-size="88">${mainSymbol}</text>`,
-    `<text x="34" y="${height - 54}" fill="${accent}" font-family="monospace" font-size="13" letter-spacing="2">${label}</text>`,
-    `<text x="34" y="${height - 34}" fill="${accent}" fill-opacity="0.68" font-family="monospace" font-size="11">${sublabel}</text>`,
-    `</svg>`
-  ].join("");
-  return "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg);
-}
 
 const DEFAULT_PROFILE = {
   name: "asonozz.",
@@ -51,116 +38,22 @@ const DEFAULT_PROFILE = {
   }
 };
 
-const DEFAULT_POSTS = [
-  {
-    id: "post-1",
-    title: "Um pequeno quarto na internet",
-    category: "pensamentos",
-    date: "2026-11-24",
-    pinned: false,
-    image: "",
-    content:
-      "Nem todo projeto chega ao destino final, mas cada um deles deixa alguma coisa para trás.\n\nCriei este caderno para fugir do barulho das redes sociais. Aqui não tem algoritmo nem contagem de curtidas — só textos, polaroids no mural e ideias soltas que aparecem no meio da madrugada.\n\n> \"e se eu tentasse isso?\"\n\nSinta-se em casa."
-  },
-  {
-    id: "post-2",
-    title: "Construindo meu espaço do zero",
-    category: "código",
-    date: "2026-11-22",
-    pinned: false,
-    image: "",
-    content:
-      "Escolhi manter tudo em HTML, CSS e JavaScript puro: leve, rápido e completamente meu. O vermelho carmesim sobre o papel branco nasceu da minha identidade visual — direto, calmo e cheio de detalhes pequenos.\n\nA ideia é ir mexendo, colando novas fotos e transformando este canto junto comigo."
-  },
-  {
-    id: "post-3",
-    title: "Coisas que só fazem sentido de madrugada",
-    category: "devaneios",
-    date: "2026-11-18",
-    pinned: false,
-    image: "",
-    content:
-      "Existe um silêncio diferente depois da meia-noite. A tela acesa, nenhuma pressa e a vontade de experimentar qualquer projeto aleatório sem precisar explicar para ninguém.\n\nEste blog existe justamente para guardar esses fragmentos antes que sumam de manhã."
-  }
-];
-
-const DEFAULT_PHOTOS = [
-  {
-    id: "photo-1",
-    url: createStarterArt("#181213", "#e33d48", "愛", "SELO // 01", "carmesim & silêncio", "4/5"),
-    caption: "identidade visual — entre no modo dono para colar suas fotos",
-    date: "2026-11-24"
-  },
-  {
-    id: "photo-2",
-    url: createStarterArt("#fcfaf7", "#b81d27", "02", "MADRUGADA // 02", "quiet thoughts", "1/1"),
-    caption: "noites longas & pensamentos calmos",
-    date: "2026-11-21"
-  },
-  {
-    id: "photo-3",
-    url: createStarterArt("#b81d27", "#ffffff", "★", "DEVANEIOS // 03", "building things", "1/1"),
-    caption: "recortes de coisas que quero lembrar",
-    date: "2026-11-18"
-  },
-  {
-    id: "photo-4",
-    url: createStarterArt("#22191b", "#f5eeee", "☾", "ARQUIVO // 04", "look at the light", "4/5"),
-    caption: "um mural aberto para atmosferas e memórias",
-    date: "2026-11-14"
-  }
-];
-
-const DEFAULT_PROJECTS = [
-  {
-    id: "proj-1",
-    title: "blog-asonozz",
-    status: "em construção",
-    description: "Meu blog pessoal em estética scrapbook — feito em HTML, CSS e JS puro.",
-    url: "https://github.com/asonozz/blog-asonozz"
-  },
-  {
-    id: "proj-2",
-    title: "experimentos em código",
-    status: "caderno de estudos",
-    description: "Scripts em Python e Java, testes soltos e aprendizados do dia a dia.",
-    url: "https://github.com/asonozz"
-  },
-  {
-    id: "proj-3",
-    title: "ideias da madrugada",
-    status: "rascunhos",
-    description: "Pequenos protótipos que começaram com curiosidade e viraram referência.",
-    url: ""
-  }
-];
-
-const DEFAULT_COMMENTS = [
-  {
-    id: "comm-1",
-    postId: "post-1",
-    author: "visitante da madrugada",
-    text: "Adorei o clima de caderno desse blog! Muito mais calmo do que as redes sociais.",
-    date: "2026-11-24",
-    approved: true,
-    reply: "valeu por passar por aqui! era exatamente essa a ideia.",
-    replyDate: "2026-11-24"
-  }
-];
-
 let cloud = {
   enabled: false,
   auth: null,
   db: null,
-  fns: null
+  fns: null,
+  subscribed: false
 };
 
 let state = {
-  profile: { ...DEFAULT_PROFILE, ...loadFromStorage(STORAGE_KEYS.profile, DEFAULT_PROFILE) },
-  posts: loadFromStorage(STORAGE_KEYS.posts, DEFAULT_POSTS),
-  photos: loadFromStorage(STORAGE_KEYS.photos, DEFAULT_PHOTOS),
-  projects: loadFromStorage(STORAGE_KEYS.projects, DEFAULT_PROJECTS),
-  comments: loadFromStorage(STORAGE_KEYS.comments, DEFAULT_COMMENTS),
+  profile: HAS_FIREBASE
+    ? structuredClone(DEFAULT_PROFILE)
+    : { ...DEFAULT_PROFILE, ...loadFromStorage(STORAGE_KEYS.profile, DEFAULT_PROFILE) },
+  posts: HAS_FIREBASE ? [] : loadFromStorage(STORAGE_KEYS.posts, []),
+  photos: HAS_FIREBASE ? [] : loadFromStorage(STORAGE_KEYS.photos, []),
+  projects: HAS_FIREBASE ? [] : loadFromStorage(STORAGE_KEYS.projects, []),
+  comments: HAS_FIREBASE ? [] : loadFromStorage(STORAGE_KEYS.comments, []),
   isOwner: false,
   activeView: "home",
   activeCategory: "todos",
@@ -194,7 +87,7 @@ function saveToStorage(key, value) {
   try {
     localStorage.setItem(key, JSON.stringify(value));
   } catch {
-    alert("O armazenamento do navegador ficou cheio. Tente usar links de imagem ou fotos menores.");
+    alert("O armazenamento local do navegador ficou cheio. Tente usar links de imagem ou fotos menores.");
   }
 }
 
@@ -202,8 +95,8 @@ function escapeHtml(text = "") {
   const div = document.createElement("div");
   div.textContent = String(text);
   return div.innerHTML
-    .replaceAll("\u0022", "&" + "quot;")
-    .replaceAll("\u0027", "&" + "#39;");
+    .replaceAll('"', "&" + "quot;")
+    .replaceAll("'", "&" + "#39;");
 }
 
 function formatDate(isoDate) {
@@ -250,16 +143,16 @@ function compressImageFile(file, maxWidth, callback) {
       canvas.height = img.height * scale;
       const ctx = canvas.getContext("2d");
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      callback(canvas.toDataURL("image/jpeg", 0.78));
+      callback(canvas.toDataURL("image/jpeg", 0.74));
     };
     img.src = e.target.result;
   };
   reader.readAsDataURL(file);
 }
 
-// === CAMADA DE PERSISTÊNCIA (LOCAL OU FIREBASE) ===
+// === CAMADA DE PERSISTÊNCIA EM TEMPO REAL (FIREBASE) ===
 async function initFirebaseIfConfigured() {
-  if (!FIREBASE_CONFIG.apiKey || !FIREBASE_CONFIG.projectId) {
+  if (!HAS_FIREBASE) {
     state.isOwner = localStorage.getItem(STORAGE_KEYS.demoOwner) === "true";
     syncOwnerUI();
     checkAdminHash();
@@ -282,80 +175,150 @@ async function initFirebaseIfConfigured() {
     document.getElementById("firebaseNotice").textContent = "Conectado ao Firebase. Entre com seu e-mail e senha de dono.";
     document.getElementById("demoLoginBtn").hidden = true;
 
-    cloud.fns.onAuthStateChanged(cloud.auth, async user => {
+    subscribeToCloud();
+
+    cloud.fns.onAuthStateChanged(cloud.auth, user => {
       state.isOwner = Boolean(user);
       if (user) closeLoginModal();
       syncOwnerUI();
-      await loadAllFromCloud();
       checkAdminHash();
     });
-
-    await loadAllFromCloud();
   } catch (err) {
     console.error("Erro ao iniciar Firebase:", err);
   }
 }
 
-async function loadAllFromCloud() {
-  if (!cloud.enabled) return;
-  const { doc, getDoc, collection, getDocs } = cloud.fns;
+function subscribeToCloud() {
+  if (!cloud.enabled || cloud.subscribed) return;
+  cloud.subscribed = true;
 
-  try {
-    const profileSnap = await getDoc(doc(cloud.db, "site", "profile"));
-    if (profileSnap.exists()) {
-      state.profile = { ...DEFAULT_PROFILE, ...profileSnap.data() };
-    }
+  const { doc, collection, onSnapshot } = cloud.fns;
 
-    const [postsSnap, photosSnap, projSnap, commSnap] = await Promise.all([
-      getDocs(collection(cloud.db, "posts")),
-      getDocs(collection(cloud.db, "photos")),
-      getDocs(collection(cloud.db, "projects")),
-      getDocs(collection(cloud.db, "comments"))
-    ]);
+  // Perfil em tempo real
+  onSnapshot(
+    doc(cloud.db, "site", "profile"),
+    snap => {
+      if (snap.exists()) {
+        state.profile = { ...DEFAULT_PROFILE, ...snap.data() };
+      } else {
+        state.profile = structuredClone(DEFAULT_PROFILE);
+      }
+      renderProfile();
+    },
+    err => console.error("Erro ao sincronizar perfil:", err)
+  );
 
-    if (!postsSnap.empty) {
-      state.posts = postsSnap.docs.map(d => d.data()).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-    }
-    if (!photosSnap.empty) {
-      state.photos = photosSnap.docs.map(d => d.data()).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-    }
-    if (!projSnap.empty) {
-      state.projects = projSnap.docs.map(d => d.data()).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-    }
-    state.comments = commSnap.docs.map(d => d.data()).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  // Textos em tempo real
+  onSnapshot(
+    collection(cloud.db, "posts"),
+    snap => {
+      state.posts = snap.docs
+        .map(d => d.data())
+        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      renderPosts();
+      if (state.activeView === "archive") renderArchive();
+      if (state.activeView === "post" && state.currentPostId) {
+        const stillExists = state.posts.some(p => p.id === state.currentPostId);
+        if (stillExists) openPostDetail(state.currentPostId, false);
+        else switchView("home");
+      }
+    },
+    err => console.error("Erro ao sincronizar textos:", err)
+  );
 
-    renderAll();
-  } catch (err) {
-    console.error("Erro ao carregar dados do Firebase:", err);
-  }
+  // Mural de fotos em tempo real
+  onSnapshot(
+    collection(cloud.db, "photos"),
+    snap => {
+      state.photos = snap.docs
+        .map(d => d.data())
+        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      renderMural();
+    },
+    err => console.error("Erro ao sincronizar mural:", err)
+  );
+
+  // Devaneios em tempo real
+  onSnapshot(
+    collection(cloud.db, "projects"),
+    snap => {
+      state.projects = snap.docs
+        .map(d => d.data())
+        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      renderProjects();
+    },
+    err => console.error("Erro ao sincronizar devaneios:", err)
+  );
+
+  // Bilhetinhos em tempo real
+  onSnapshot(
+    collection(cloud.db, "comments"),
+    snap => {
+      state.comments = snap.docs
+        .map(d => d.data())
+        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      syncOwnerUI();
+      renderPosts();
+      if (!document.getElementById("moderationModal").hidden) {
+        renderModerationModal();
+      }
+    },
+    err => console.error("Erro ao sincronizar bilhetinhos:", err)
+  );
 }
 
 async function persistProfile() {
-  saveToStorage(STORAGE_KEYS.profile, state.profile);
-  if (cloud.enabled && state.isOwner) {
+  if (!cloud.enabled) {
+    saveToStorage(STORAGE_KEYS.profile, state.profile);
+    return true;
+  }
+  if (!state.isOwner) return false;
+  try {
     await cloud.fns.setDoc(cloud.fns.doc(cloud.db, "site", "profile"), state.profile);
+    return true;
+  } catch (err) {
+    console.error("Erro ao salvar perfil no Firebase:", err);
+    alert("Não foi possível salvar no Firebase. Confira se você está logado como dono e se a imagem não é grande demais.");
+    return false;
   }
 }
 
 async function persistDoc(colName, item) {
-  if (colName === "posts") saveToStorage(STORAGE_KEYS.posts, state.posts);
-  if (colName === "photos") saveToStorage(STORAGE_KEYS.photos, state.photos);
-  if (colName === "projects") saveToStorage(STORAGE_KEYS.projects, state.projects);
-  if (colName === "comments") saveToStorage(STORAGE_KEYS.comments, state.comments);
+  if (!cloud.enabled) {
+    if (colName === "posts") saveToStorage(STORAGE_KEYS.posts, state.posts);
+    if (colName === "photos") saveToStorage(STORAGE_KEYS.photos, state.photos);
+    if (colName === "projects") saveToStorage(STORAGE_KEYS.projects, state.projects);
+    if (colName === "comments") saveToStorage(STORAGE_KEYS.comments, state.comments);
+    return true;
+  }
 
-  if (cloud.enabled) {
+  try {
     await cloud.fns.setDoc(cloud.fns.doc(cloud.db, colName, item.id), item);
+    return true;
+  } catch (err) {
+    console.error(`Erro ao salvar em ${colName}:`, err);
+    alert("Não foi possível salvar no Firebase. Confira sua conexão ou se as regras de segurança estão com o seu UID certo.");
+    return false;
   }
 }
 
 async function removeDoc(colName, id) {
-  if (colName === "posts") saveToStorage(STORAGE_KEYS.posts, state.posts);
-  if (colName === "photos") saveToStorage(STORAGE_KEYS.photos, state.photos);
-  if (colName === "projects") saveToStorage(STORAGE_KEYS.projects, state.projects);
-  if (colName === "comments") saveToStorage(STORAGE_KEYS.comments, state.comments);
+  if (!cloud.enabled) {
+    if (colName === "posts") saveToStorage(STORAGE_KEYS.posts, state.posts);
+    if (colName === "photos") saveToStorage(STORAGE_KEYS.photos, state.photos);
+    if (colName === "projects") saveToStorage(STORAGE_KEYS.projects, state.projects);
+    if (colName === "comments") saveToStorage(STORAGE_KEYS.comments, state.comments);
+    return true;
+  }
+  if (!state.isOwner) return false;
 
-  if (cloud.enabled && state.isOwner) {
+  try {
     await cloud.fns.deleteDoc(cloud.fns.doc(cloud.db, colName, id));
+    return true;
+  } catch (err) {
+    console.error(`Erro ao apagar em ${colName}:`, err);
+    alert("Não foi possível apagar no Firebase. Confira se você está logado na conta de dono.");
+    return false;
   }
 }
 
@@ -638,10 +601,13 @@ function openPostDetail(postId, shouldSwitch = true) {
   document.getElementById("togglePinPostBtn").addEventListener("click", () => togglePinPost(post.id));
   document.getElementById("editCurrentPostBtn").addEventListener("click", () => openPostModal(post));
   document.getElementById("deleteCurrentPostBtn").addEventListener("click", () => deletePost(post.id));
-  document.getElementById("commentFeedback").textContent = "";
+
+  if (shouldSwitch) {
+    document.getElementById("commentFeedback").textContent = "";
+    switchView("post");
+  }
 
   renderCommentsForPost(postId);
-  if (shouldSwitch) switchView("post");
 }
 
 async function togglePinPost(postId) {
@@ -649,9 +615,11 @@ async function togglePinPost(postId) {
   const post = state.posts.find(p => p.id === postId);
   if (!post) return;
   post.pinned = !post.pinned;
-  await persistDoc("posts", post);
-  renderPosts();
-  openPostDetail(postId, false);
+  const ok = await persistDoc("posts", post);
+  if (ok) {
+    renderPosts();
+    openPostDetail(postId, false);
+  }
 }
 
 function renderCommentsForPost(postId) {
@@ -832,9 +800,11 @@ function renderProjects() {
     btn.addEventListener("click", async () => {
       if (!confirm("Remover esta ficha de devaneio?")) return;
       const id = btn.dataset.projectId;
-      state.projects = state.projects.filter(p => p.id !== id);
-      await removeDoc("projects", id);
-      renderProjects();
+      const ok = await removeDoc("projects", id);
+      if (ok) {
+        state.projects = state.projects.filter(p => p.id !== id);
+        renderProjects();
+      }
     });
   });
 }
@@ -930,10 +900,12 @@ function closePostModal() {
 async function deletePost(postId) {
   if (!state.isOwner) return;
   if (!confirm("Tem certeza que deseja excluir este texto?")) return;
-  state.posts = state.posts.filter(p => p.id !== postId);
-  await removeDoc("posts", postId);
-  renderPosts();
-  switchView("home", true);
+  const ok = await removeDoc("posts", postId);
+  if (ok) {
+    state.posts = state.posts.filter(p => p.id !== postId);
+    renderPosts();
+    switchView("home", true);
+  }
 }
 
 function openPhotoModal() {
@@ -982,10 +954,12 @@ async function deleteCurrentPhoto() {
   if (!state.isOwner || !state.currentLightboxPhotoId) return;
   if (!confirm("Remover esta foto do mural?")) return;
   const id = state.currentLightboxPhotoId;
-  state.photos = state.photos.filter(p => p.id !== id);
-  await removeDoc("photos", id);
-  closeLightbox();
-  renderMural();
+  const ok = await removeDoc("photos", id);
+  if (ok) {
+    state.photos = state.photos.filter(p => p.id !== id);
+    closeLightbox();
+    renderMural();
+  }
 }
 
 function openProfileModal() {
@@ -1046,32 +1020,32 @@ function exportBackup() {
 
 function importBackup(file) {
   const reader = new FileReader();
-  reader.onload = e => {
+  reader.onload = async e => {
     try {
       const parsed = JSON.parse(e.target.result);
       if (parsed.profile) {
         state.profile = { ...DEFAULT_PROFILE, ...parsed.profile };
-        saveToStorage(STORAGE_KEYS.profile, state.profile);
+        await persistProfile();
       }
       if (Array.isArray(parsed.posts)) {
         state.posts = parsed.posts;
-        saveToStorage(STORAGE_KEYS.posts, state.posts);
+        await Promise.all(parsed.posts.map(item => persistDoc("posts", item)));
       }
       if (Array.isArray(parsed.photos)) {
         state.photos = parsed.photos;
-        saveToStorage(STORAGE_KEYS.photos, state.photos);
+        await Promise.all(parsed.photos.map(item => persistDoc("photos", item)));
       }
       if (Array.isArray(parsed.projects)) {
         state.projects = parsed.projects;
-        saveToStorage(STORAGE_KEYS.projects, state.projects);
+        await Promise.all(parsed.projects.map(item => persistDoc("projects", item)));
       }
       if (Array.isArray(parsed.comments)) {
         state.comments = parsed.comments;
-        saveToStorage(STORAGE_KEYS.comments, state.comments);
+        await Promise.all(parsed.comments.map(item => persistDoc("comments", item)));
       }
       renderAll();
       switchView("home");
-      alert("Backup importado com sucesso!");
+      alert("Backup importado e sincronizado com sucesso!");
     } catch {
       alert("Arquivo inválido. Selecione um backup .json gerado pelo blog.");
     }
@@ -1208,17 +1182,20 @@ function bindEvents() {
       replyDate: ""
     };
 
-    state.comments.unshift(newComment);
-    await persistDoc("comments", newComment);
+    const ok = await persistDoc("comments", newComment);
+    if (!ok) return;
+
+    if (!cloud.enabled) {
+      state.comments.unshift(newComment);
+      syncOwnerUI();
+      renderPosts();
+    }
 
     document.getElementById("commentAuthorInput").value = "";
     document.getElementById("commentTextInput").value = "";
     document.getElementById("commentFeedback").textContent = state.isOwner
       ? "Bilhetinho publicado!"
       : "Bilhetinho enviado! Vai aparecer aqui assim que @asonozz aprovar.";
-
-    syncOwnerUI();
-    renderPosts();
   });
 
   // Modal de Post
@@ -1264,7 +1241,6 @@ function bindEvents() {
     if (id) {
       const existing = state.posts.find(p => p.id === id);
       savedPost = { ...existing, title, category, date, content, image, pinned };
-      state.posts = state.posts.map(p => (p.id === id ? savedPost : p));
     } else {
       savedPost = {
         id: "post-" + Date.now(),
@@ -1276,13 +1252,18 @@ function bindEvents() {
         image,
         content
       };
-      state.posts.unshift(savedPost);
     }
 
-    await persistDoc("posts", savedPost);
-    renderPosts();
-    closePostModal();
+    const ok = await persistDoc("posts", savedPost);
+    if (!ok) return;
 
+    if (!cloud.enabled) {
+      if (id) state.posts = state.posts.map(p => (p.id === id ? savedPost : p));
+      else state.posts.unshift(savedPost);
+      renderPosts();
+    }
+
+    closePostModal();
     if (id) openPostDetail(id);
     else switchView("home", true);
   });
@@ -1330,9 +1311,13 @@ function bindEvents() {
       createdAt: Date.now()
     };
 
-    state.photos.unshift(newPhoto);
-    await persistDoc("photos", newPhoto);
-    renderMural();
+    const ok = await persistDoc("photos", newPhoto);
+    if (!ok) return;
+
+    if (!cloud.enabled) {
+      state.photos.unshift(newPhoto);
+      renderMural();
+    }
     closePhotoModal();
   });
 
@@ -1359,9 +1344,13 @@ function bindEvents() {
       createdAt: Date.now()
     };
 
-    state.projects.unshift(newProj);
-    await persistDoc("projects", newProj);
-    renderProjects();
+    const ok = await persistDoc("projects", newProj);
+    if (!ok) return;
+
+    if (!cloud.enabled) {
+      state.projects.unshift(newProj);
+      renderProjects();
+    }
     closeProjectModal();
   });
 
@@ -1425,9 +1414,12 @@ function bindEvents() {
         guns: document.getElementById("profileGunsInput").value.trim()
       }
     };
-    await persistProfile();
-    renderProfile();
-    closeProfileModal();
+
+    const ok = await persistProfile();
+    if (ok) {
+      renderProfile();
+      closeProfileModal();
+    }
   });
 
   // Backup

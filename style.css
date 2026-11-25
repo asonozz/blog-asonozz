@@ -1942,3 +1942,40 @@ body.is-owner .owner-only-flex {
   box-shadow: 0 14px 32px rgba(0, 0, 0, 0.22);
   display: block;
 }
+
+/* Slider de tamanho da foto no card + garantia visual das capas nos cards do feed */
+.story-slider-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 180px;
+}
+
+.story-slider-wrap input[type="range"] {
+  flex: 1;
+  accent-color: var(--crimson);
+  cursor: pointer;
+}
+
+.story-slider-value {
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  color: var(--text);
+  min-width: 36px;
+  text-align: right;
+}
+
+.post-card-cover-wrap {
+  width: 100%;
+  overflow: hidden;
+  background: var(--surface-subtle);
+}
+
+.post-card-cover {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 440px;
+  object-fit: cover;
+}

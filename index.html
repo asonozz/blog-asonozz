@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Great+Vibes&family=JetBrains+Mono:wght@400;500&family=Quicksand:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=5">
+  <link rel="stylesheet" href="style.css?v=6">
 </head>
 <body>
   <div class="scroll-progress" id="scrollProgress" aria-hidden="true"></div>
@@ -293,14 +293,20 @@
           </div>
         </div>
 
-        <div class="story-control-row" id="storyPhotoSizeRow" hidden>
+        <div class="story-control-row" id="storyPhotoModeRow" hidden>
           <span class="story-control-label">Foto</span>
-          <div class="story-pill-group" id="storyPhotoSizeGroup">
-            <button type="button" class="pill" data-story-photo="sm">Pequena</button>
-            <button type="button" class="pill active" data-story-photo="md">Média</button>
-            <button type="button" class="pill" data-story-photo="lg">Grande</button>
-            <button type="button" class="pill" data-story-photo="contain">Sem corte</button>
-            <button type="button" class="pill" data-story-photo="none">Ocultar</button>
+          <div class="story-pill-group" id="storyPhotoModeGroup">
+            <button type="button" class="pill active" data-story-photo-mode="cover">Preencher</button>
+            <button type="button" class="pill" data-story-photo-mode="contain">Sem corte</button>
+            <button type="button" class="pill" data-story-photo-mode="none">Ocultar</button>
+          </div>
+        </div>
+
+        <div class="story-control-row" id="storyPhotoScaleRow" hidden>
+          <span class="story-control-label">Tamanho</span>
+          <div class="story-slider-wrap">
+            <input type="range" id="storyPhotoScaleInput" min="22" max="64" step="2" value="44" aria-label="Tamanho da foto no card">
+            <span class="story-slider-value" id="storyPhotoScaleValue">44%</span>
           </div>
         </div>
       </div>
@@ -601,6 +607,6 @@ madrugadas calmas"></textarea>
     </div>
   </div>
 
-  <script src="script.js?v=5"></script>
+  <script src="script.js?v=6"></script>
 </body>
 </html>

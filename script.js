@@ -62,7 +62,10 @@ let state = {
   pendingPostIdFromHash: null,
   storyTheme: "light",
   storyFormat: "story",
-  storyPhotoSize: "md",
+  storyPhotoMode: "cover",
+  storyPhotoScale: 44,
+  cachedStoryImgSrc: "",
+  cachedStoryImg: null,
   currentLightboxPhotoId: null,
   tempPostImage: "",
   tempProfileAvatar: "",
@@ -682,20 +685,46 @@ function openPostDetail(postId, shouldSwitch = true) {
 }
 
 // === GERADOR DE CARD PARA STORIES / FEED / QUADRADO ===
-function loadImageForCanvas(src) {
+function tryLoadImg(url, useCors) {
   return new Promise(resolve => {
-    if (!src) {
-      resolve(null);
-      return;
-    }
     const img = new Image();
-    if (!src.startsWith("data:")) {
-      img.crossOrigin = "anonymous";
-    }
+    if (useCors) img.crossOrigin = "anonymous";
     img.onload = () => resolve(img);
     img.onerror = () => resolve(null);
-    img.src = src;
+    img.src = url;
   });
+}
+
+async function loadImageForCanvas(src) {
+  if (!src) return null;
+  if (state.cachedStoryImgSrc === src && state.cachedStoryImg) {
+    return state.cachedStoryImg;
+  }
+
+  let img = null;
+  if (src.startsWith("data:") || src.startsWith("blob:")) {
+    img = await tryLoadImg(src, false);
+  } else {
+    // 1. Tenta direto com permissão para exportar PNG
+    img = await tryLoadImg(src, true);
+
+    // 2. Se o servidor externo bloquear CORS, carrega via proxy mantendo o download funcionando
+    if (!img) {
+      const stripped = src.replace(/^https?:\/\//i, "");
+      img = await tryLoadImg(`https://wsrv.nl/?url=${encodeURIComponent(stripped)}&output=jpg`, true);
+    }
+
+    // 3. Último recurso: exibe na prévia mesmo se o host bloquear exportação
+    if (!img) {
+      img = await tryLoadImg(src, false);
+    }
+  }
+
+  if (img) {
+    state.cachedStoryImgSrc = src;
+    state.cachedStoryImg = img;
+  }
+  return img;
 }
 
 function drawRoundedRect(ctx, x, y, w, h, r) {
@@ -725,34 +754,130 @@ function drawImageCover(ctx, img, x, y, w, h) {
 
 function wrapCanvasText(ctx, text, maxWidth, maxLines) {
   const words = String(text || "").replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
+  if (!words.length || maxLines < 1) return [];
+
   const lines = [];
   let current = "";
+  let consumed = 0;
 
-  for (const word of words) {
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i];
     const test = current ? `${current} ${word}` : word;
     if (ctx.measureText(test).width <= maxWidth) {
       current = test;
+      consumed = i + 1;
     } else {
-      if (current) lines.push(current);
-      current = word;
-      if (lines.length === maxLines - 1) break;
+      if (current) {
+        lines.push(current);
+        if (lines.length === maxLines) {
+          current = "";
+          break;
+        }
+        current = word;
+        consumed = i + 1;
+      } else {
+        // Palavra maior que a linha
+        lines.push(word);
+        consumed = i + 1;
+        if (lines.length === maxLines) {
+          current = "";
+          break;
+        }
+      }
     }
   }
   if (current && lines.length < maxLines) {
     lines.push(current);
   }
 
-  const joinedLen = lines.join(" ").length;
-  const fullLen = words.join(" ").length;
-  if (lines.length === maxLines && joinedLen < fullLen) {
-    let last = lines[maxLines - 1];
+  if (consumed < words.length && lines.length > 0) {
+    let last = lines[lines.length - 1];
     while (ctx.measureText(last + "…").width > maxWidth && last.length > 3) {
       last = last.slice(0, -1).trim();
     }
-    lines[maxLines - 1] = last + "…";
+    lines[lines.length - 1] = last + "…";
   }
 
   return lines;
+}
+
+function computeAdaptiveTypography(ctx, title, excerpt, maxWidth, totalHeight, format) {
+  const isStory = format === "story";
+  const isSquare = format === "square";
+
+  // Define teto e piso proporcionais ao espaço livre restante
+  const maxTitleSize = isStory ? 68 : isSquare ? 48 : 56;
+  const minTitleSize = isStory ? 34 : 28;
+  const maxBodySize = isStory ? 36 : isSquare ? 27 : 30;
+  const minBodySize = isStory ? 22 : 19;
+
+  // Escala inicial baseada na altura disponível para texto
+  const refHeight = isStory ? 680 : isSquare ? 380 : 460;
+  const ratio = Math.max(0.35, Math.min(1.15, totalHeight / refHeight));
+
+  let titleSize = Math.round(minTitleSize + (maxTitleSize - minTitleSize) * Math.min(1, ratio));
+  let titleLineH = Math.round(titleSize * 1.16);
+  let titleLines = [];
+
+  const titleBudget = Math.max(titleLineH, Math.floor(totalHeight * (excerpt ? 0.44 : 0.85)));
+
+  // Ajusta o tamanho do título até caber no orçamento sem esmagar o trecho
+  while (titleSize >= minTitleSize) {
+    titleLineH = Math.round(titleSize * 1.16);
+    const maxTLines = Math.max(1, Math.min(4, Math.floor(titleBudget / titleLineH)));
+    ctx.font = `700 ${titleSize}px 'Coolvetica', 'Quicksand', sans-serif`;
+    titleLines = wrapCanvasText(ctx, title, maxWidth, maxTLines);
+    const fullTitleFit = titleLines.join(" ").indexOf("…") === -1;
+    const usedH = titleLines.length * titleLineH;
+    if ((fullTitleFit && usedH <= titleBudget) || titleSize === minTitleSize) break;
+    titleSize -= 2;
+  }
+
+  const titleBlockH = titleLines.length * titleLineH;
+  const gapBetween = Math.max(10, Math.min(26, Math.round(totalHeight * 0.045)));
+  const bodyBudget = Math.max(0, totalHeight - titleBlockH - gapBetween);
+
+  let bodySize = Math.round(minBodySize + (maxBodySize - minBodySize) * Math.min(1, ratio));
+  let bodyLineH = Math.round(bodySize * 1.38);
+  let bodyLines = [];
+
+  if (excerpt && bodyBudget >= minBodySize * 1.3) {
+    // Se sobrou pouco espaço (foto grande), reduz o texto para sempre exibir algumas linhas legíveis
+    while (bodySize > minBodySize) {
+      bodyLineH = Math.round(bodySize * 1.38);
+      const possibleLines = Math.floor(bodyBudget / bodyLineH);
+      if (possibleLines >= 3) break;
+      bodySize -= 2;
+    }
+
+    // Se o espaço é grande mas o texto é curto, cresce um pouco para equilibrar
+    ctx.font = `500 ${bodySize}px 'Coolvetica', 'Quicksand', sans-serif`;
+    bodyLineH = Math.round(bodySize * 1.38);
+    let maxBLines = Math.max(1, Math.floor(bodyBudget / bodyLineH));
+    bodyLines = wrapCanvasText(ctx, excerpt, maxWidth, maxBLines);
+
+    while (
+      bodySize < maxBodySize &&
+      bodyLines.join(" ").indexOf("…") === -1 &&
+      bodyLines.length * Math.round((bodySize + 2) * 1.38) < bodyBudget * 0.65
+    ) {
+      bodySize += 2;
+      bodyLineH = Math.round(bodySize * 1.38);
+      ctx.font = `500 ${bodySize}px 'Coolvetica', 'Quicksand', sans-serif`;
+      maxBLines = Math.max(1, Math.floor(bodyBudget / bodyLineH));
+      bodyLines = wrapCanvasText(ctx, excerpt, maxWidth, maxBLines);
+    }
+  }
+
+  return {
+    titleSize,
+    titleLineH,
+    titleLines,
+    gapBetween,
+    bodySize,
+    bodyLineH,
+    bodyLines
+  };
 }
 
 async function renderStoryCard(post) {
@@ -761,12 +886,13 @@ async function renderStoryCard(post) {
 
   const format = state.storyFormat || "story";
   const theme = state.storyTheme || "light";
-  const photoSize = state.storyPhotoSize || "md";
+  const photoMode = state.storyPhotoMode || "cover";
+  const photoScale = Number(state.storyPhotoScale) || 44;
 
   const presets = {
-    story: { W: 1080, H: 1920, padX: 72, cardY: 110, bottomGap: 220, innerPad: 64, headerH: 114, footerH: 122 },
-    portrait: { W: 1080, H: 1350, padX: 56, cardY: 56, bottomGap: 56, innerPad: 56, headerH: 98, footerH: 108 },
-    square: { W: 1080, H: 1080, padX: 48, cardY: 48, bottomGap: 48, innerPad: 52, headerH: 92, footerH: 98 }
+    story: { W: 1080, H: 1920, padX: 72, cardY: 100, bottomGap: 230, innerPad: 64, headerH: 106, footerH: 118 },
+    portrait: { W: 1080, H: 1350, padX: 56, cardY: 52, bottomGap: 52, innerPad: 54, headerH: 92, footerH: 102 },
+    square: { W: 1080, H: 1080, padX: 44, cardY: 44, bottomGap: 44, innerPad: 48, headerH: 84, footerH: 92 }
   };
   const cfg = presets[format] || presets.story;
   const { W, H, padX, cardY, bottomGap, innerPad, headerH, footerH } = cfg;
@@ -847,7 +973,7 @@ async function renderStoryCard(post) {
   // Marca d'água 愛
   ctx.save();
   ctx.fillStyle = palette.watermark;
-  ctx.font = `700 ${format === "square" ? 420 : 520}px serif`;
+  ctx.font = `700 ${format === "square" ? 400 : 520}px serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText("愛", W / 2 + 110, cardY + cardH * 0.62);
@@ -856,15 +982,15 @@ async function renderStoryCard(post) {
   const contentX = padX + innerPad;
   const contentW = cardW - innerPad * 2;
   const footerY = cardY + cardH - footerH;
-  let cursorY = cardY + (format === "story" ? 72 : 52);
+  let cursorY = cardY + (format === "story" ? 64 : 44);
 
   // Selo hanko vermelho + nome do blog
-  const sealSize = format === "story" ? 70 : 62;
+  const sealSize = format === "story" ? 68 : 58;
   drawRoundedRect(ctx, contentX, cursorY, sealSize, sealSize, 15);
   ctx.fillStyle = palette.crimson;
   ctx.fill();
   ctx.fillStyle = "#ffffff";
-  ctx.font = `700 ${format === "story" ? 40 : 36}px serif`;
+  ctx.font = `700 ${format === "story" ? 38 : 34}px serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText("愛", contentX + sealSize / 2, cursorY + sealSize / 2 + 2);
@@ -872,56 +998,56 @@ async function renderStoryCard(post) {
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
   ctx.fillStyle = palette.text;
-  ctx.font = `700 ${format === "story" ? 40 : 36}px 'Coolvetica', 'Quicksand', sans-serif`;
-  ctx.fillText(state.profile.name || "asonozz.", contentX + sealSize + 20, cursorY + Math.round(sealSize * 0.48));
+  ctx.font = `700 ${format === "story" ? 38 : 34}px 'Coolvetica', 'Quicksand', sans-serif`;
+  ctx.fillText(state.profile.name || "asonozz.", contentX + sealSize + 18, cursorY + Math.round(sealSize * 0.48));
 
   ctx.fillStyle = palette.muted;
-  ctx.font = `500 ${format === "story" ? 23 : 20}px 'JetBrains Mono', monospace`;
-  ctx.fillText("⋆⭒˚.⋆ novo texto no caderno", contentX + sealSize + 20, cursorY + Math.round(sealSize * 0.90));
+  ctx.font = `500 ${format === "story" ? 22 : 19}px 'JetBrains Mono', monospace`;
+  ctx.fillText("⋆⭒˚.⋆ novo texto no caderno", contentX + sealSize + 18, cursorY + Math.round(sealSize * 0.90));
 
   cursorY += headerH;
 
-  const availableH = footerY - cursorY - 24;
+  const availableH = footerY - cursorY - 20;
 
-  // Foto do post com escolha de tamanho
-  const loadedImg = photoSize === "none" ? null : await loadImageForCanvas(post.image);
+  // Foto do post (sempre carregada quando existir e não estiver oculta)
+  const loadedImg = (photoMode === "none" || !post.image) ? null : await loadImageForCanvas(post.image);
 
   if (loadedImg) {
-    const framePad = format === "square" ? 16 : 20;
-    const polaroidBottomLip = format === "square" ? 28 : 38;
-    let polW = contentW;
-    let polH = Math.round(availableH * 0.44);
+    const framePad = format === "square" ? 14 : 18;
+    const polaroidBottomLip = format === "square" ? 22 : 34;
+    const maxPolH = Math.round(availableH * (photoScale / 100));
 
-    if (photoSize === "sm") {
-      polW = Math.round(contentW * 0.72);
-      polH = Math.round(availableH * 0.30);
-    } else if (photoSize === "md") {
-      polW = contentW;
-      polH = Math.round(availableH * 0.44);
-    } else if (photoSize === "lg") {
-      polW = contentW;
-      polH = Math.round(availableH * 0.58);
-    } else if (photoSize === "contain") {
+    let polW = contentW;
+    let polH = maxPolH;
+
+    if (photoMode === "contain") {
+      // Sem corte: moldura acompanha exatamente a proporção original da foto
       const maxImgW = contentW - framePad * 2;
-      const maxImgH = Math.round(availableH * 0.56) - framePad * 2 - polaroidBottomLip;
+      const maxImgH = Math.max(80, maxPolH - framePad * 2 - polaroidBottomLip);
       const ratio = Math.min(maxImgW / loadedImg.width, maxImgH / loadedImg.height);
       const drawW = Math.round(loadedImg.width * ratio);
       const drawH = Math.round(loadedImg.height * ratio);
       polW = drawW + framePad * 2;
       polH = drawH + framePad * 2 + polaroidBottomLip;
+    } else {
+      // Preencher: largura acompanha sutilmente fotos bem pequenas para ficar harmônico
+      if (photoScale <= 30) {
+        polW = Math.round(contentW * (0.76 + ((photoScale - 22) / 8) * 0.24));
+      }
+      polH = maxPolH;
     }
 
-    const imgBoxW = polW - framePad * 2;
-    const imgBoxH = polH - framePad * 2 - polaroidBottomLip;
+    const imgBoxW = Math.max(40, polW - framePad * 2);
+    const imgBoxH = Math.max(40, polH - framePad * 2 - polaroidBottomLip);
     const polCenterX = contentX + contentW / 2;
     const polCenterY = cursorY + polH / 2;
 
     ctx.save();
     ctx.translate(polCenterX, polCenterY);
-    ctx.rotate(-0.012);
+    ctx.rotate(-0.01);
 
     ctx.shadowColor = "rgba(0,0,0,0.18)";
-    ctx.shadowBlur = 26;
+    ctx.shadowBlur = 24;
     ctx.shadowOffsetY = 10;
     drawRoundedRect(ctx, -polW / 2, -polH / 2, polW, polH, 14);
     ctx.fillStyle = palette.polaroidBg;
@@ -931,35 +1057,39 @@ async function renderStoryCard(post) {
     ctx.save();
     drawRoundedRect(ctx, -polW / 2 + framePad, -polH / 2 + framePad, imgBoxW, imgBoxH, 8);
     ctx.clip();
-    if (photoSize === "contain") {
+    if (photoMode === "contain") {
       ctx.drawImage(loadedImg, -polW / 2 + framePad, -polH / 2 + framePad, imgBoxW, imgBoxH);
     } else {
       drawImageCover(ctx, loadedImg, -polW / 2 + framePad, -polH / 2 + framePad, imgBoxW, imgBoxH);
     }
     ctx.restore();
 
-    // Fita adesiva decorativa no topo
-    const tapeW = Math.min(140, Math.round(polW * 0.28));
+    // Fita adesiva decorativa no topo da polaroid
+    const tapeW = Math.min(136, Math.round(polW * 0.26));
     ctx.fillStyle = isDark ? "rgba(227, 61, 72, 0.35)" : "rgba(184, 29, 39, 0.22)";
-    ctx.fillRect(-tapeW / 2, -polH / 2 - 12, tapeW, 28);
+    ctx.fillRect(-tapeW / 2, -polH / 2 - 10, tapeW, 24);
 
     ctx.restore();
-    cursorY += polH + (format === "square" ? 26 : 40);
+    cursorY += polH + (format === "square" ? 20 : 32);
   } else {
-    cursorY += format === "story" ? 34 : 18;
+    cursorY += format === "story" ? 28 : 16;
     ctx.fillStyle = palette.crimson;
-    ctx.fillRect(contentX, cursorY, 92, 6);
-    cursorY += format === "story" ? 56 : 40;
+    ctx.fillRect(contentX, cursorY, 88, 6);
+    cursorY += format === "story" ? 48 : 34;
   }
 
-  // Etiquetas de Data e Categoria
+  // Etiquetas de Data e Categoria (ajustam tamanho se sobrar pouco espaço)
+  const remBeforePills = footerY - cursorY;
+  const compactMeta = remBeforePills < 260;
+  const pillH = compactMeta ? 36 : format === "square" ? 40 : 46;
+  const metaFontSize = compactMeta ? 18 : format === "square" ? 19 : 22;
+
   const dateText = formatDate(post.date);
   const catText = (post.category || "pensamentos").toUpperCase();
-  const pillH = format === "square" ? 42 : 48;
 
-  ctx.font = `600 ${format === "square" ? 20 : 23}px 'JetBrains Mono', monospace`;
-  const dateW = ctx.measureText(dateText).width + 38;
-  const catW = ctx.measureText(catText).width + 38;
+  ctx.font = `600 ${metaFontSize}px 'JetBrains Mono', monospace`;
+  const dateW = ctx.measureText(dateText).width + 34;
+  const catW = ctx.measureText(catText).width + 34;
 
   drawRoundedRect(ctx, contentX, cursorY, dateW, pillH, pillH / 2);
   ctx.fillStyle = palette.pillBg;
@@ -969,62 +1099,47 @@ async function renderStoryCard(post) {
   ctx.stroke();
   ctx.fillStyle = palette.text;
   ctx.textBaseline = "middle";
-  ctx.fillText(dateText, contentX + 19, cursorY + pillH / 2 + 1);
+  ctx.fillText(dateText, contentX + 17, cursorY + pillH / 2 + 1);
 
-  drawRoundedRect(ctx, contentX + dateW + 14, cursorY, catW, pillH, pillH / 2);
+  drawRoundedRect(ctx, contentX + dateW + 12, cursorY, catW, pillH, pillH / 2);
   ctx.fillStyle = palette.crimson;
   ctx.fill();
   ctx.fillStyle = "#ffffff";
-  ctx.fillText(catText, contentX + dateW + 33, cursorY + pillH / 2 + 1);
+  ctx.fillText(catText, contentX + dateW + 29, cursorY + pillH / 2 + 1);
 
-  cursorY += pillH + (format === "square" ? 42 : 52);
+  cursorY += pillH + (compactMeta ? 18 : format === "square" ? 26 : 34);
 
-  // Título (ajustado automaticamente ao espaço que sobrou)
-  const remAfterPills = footerY - cursorY - 20;
-  const titleFontSize = format === "story"
-    ? (photoSize === "lg" && loadedImg ? 54 : 64)
-    : format === "portrait"
-      ? (photoSize === "lg" && loadedImg ? 46 : 54)
-      : (photoSize === "lg" && loadedImg ? 40 : 48);
-  const titleLineH = titleFontSize + 12;
-  const maxTitleLines = Math.max(
-    1,
-    Math.min(loadedImg ? 3 : 4, Math.floor((remAfterPills - 44) / titleLineH))
-  );
+  // Texto adaptável ao espaço exato que sobrou abaixo da foto
+  const cleanExcerpt = String(post.content || "")
+    .replace(/^>\s?/gm, "")
+    .replace(/\s+/g, " ")
+    .trim();
 
-  ctx.textBaseline = "alphabetic";
+  const textZoneH = Math.max(80, footerY - cursorY - 16);
+  const typo = computeAdaptiveTypography(ctx, post.title, cleanExcerpt, contentW, textZoneH, format);
+
+  // Desenha título
+  ctx.textBaseline = "top";
   ctx.fillStyle = palette.text;
-  ctx.font = `700 ${titleFontSize}px 'Coolvetica', 'Quicksand', sans-serif`;
-  const titleLines = wrapCanvasText(ctx, post.title, contentW, maxTitleLines);
-  for (const line of titleLines) {
+  ctx.font = `700 ${typo.titleSize}px 'Coolvetica', 'Quicksand', sans-serif`;
+  for (const line of typo.titleLines) {
     ctx.fillText(line, contentX, cursorY);
-    cursorY += titleLineH;
+    cursorY += typo.titleLineH;
   }
 
-  cursorY += 16;
-
-  // Trecho do texto (preenche apenas o espaço seguro acima do rodapé)
-  const bodyFontSize = format === "story" ? 32 : 28;
-  const bodyLineH = bodyFontSize + 14;
-  const bodyRemH = footerY - cursorY - 18;
-  const maxBodyLines = Math.floor(bodyRemH / bodyLineH);
-
-  if (maxBodyLines >= 1) {
-    const cleanExcerpt = String(post.content || "")
-      .replace(/^>\s?/gm, "")
-      .replace(/\s+/g, " ")
-      .trim();
-
+  // Desenha trecho do post
+  if (typo.bodyLines.length) {
+    cursorY += typo.gapBetween;
     ctx.fillStyle = palette.muted;
-    ctx.font = `500 ${bodyFontSize}px 'Coolvetica', 'Quicksand', sans-serif`;
-    const bodyLines = wrapCanvasText(ctx, cleanExcerpt, contentW, maxBodyLines);
-    for (const line of bodyLines) {
+    ctx.font = `500 ${typo.bodySize}px 'Coolvetica', 'Quicksand', sans-serif`;
+    for (const line of typo.bodyLines) {
       ctx.fillText(line, contentX, cursorY);
-      cursorY += bodyLineH;
+      cursorY += typo.bodyLineH;
     }
   }
 
   // Rodapé interno do cartão
+  ctx.textBaseline = "alphabetic";
   ctx.strokeStyle = palette.border;
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -1033,28 +1148,50 @@ async function renderStoryCard(post) {
   ctx.stroke();
 
   ctx.fillStyle = palette.crimson;
-  ctx.font = `600 ${format === "square" ? 22 : 25}px 'JetBrains Mono', monospace`;
+  ctx.font = `600 ${format === "square" ? 21 : 24}px 'JetBrains Mono', monospace`;
   const ctaLine = format === "story"
     ? "toque no link abaixo para ler ↓"
     : "leia o texto completo no blog →";
-  ctx.fillText(ctaLine, contentX, footerY + (format === "square" ? 42 : 50));
+  ctx.fillText(ctaLine, contentX, footerY + (format === "square" ? 40 : 48));
 
   ctx.fillStyle = palette.muted;
-  ctx.font = `500 ${format === "square" ? 20 : 22}px 'JetBrains Mono', monospace`;
+  ctx.font = `500 ${format === "square" ? 19 : 21}px 'JetBrains Mono', monospace`;
   const hostDisplay = window.location.host || "blog-asonozz.vercel.app";
-  ctx.fillText(`${state.profile.handle || "@asonozz"}  ·  ${hostDisplay}`, contentX, footerY + (format === "square" ? 74 : 86));
+  ctx.fillText(`${state.profile.handle || "@asonozz"}  ·  ${hostDisplay}`, contentX, footerY + (format === "square" ? 70 : 82));
 }
 
 function getStoryBlob() {
   const canvas = document.getElementById("storyCanvas");
-  return new Promise(resolve => canvas.toBlob(blob => resolve(blob), "image/png"));
+  return new Promise(resolve => {
+    try {
+      canvas.toBlob(blob => resolve(blob), "image/png");
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+function syncStoryPhotoControls(post) {
+  const hasImg = Boolean(post?.image);
+  const modeRow = document.getElementById("storyPhotoModeRow");
+  const scaleRow = document.getElementById("storyPhotoScaleRow");
+  modeRow.hidden = !hasImg;
+  scaleRow.hidden = !hasImg || state.storyPhotoMode === "none";
+
+  document.querySelectorAll("#storyPhotoModeGroup .pill").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.storyPhotoMode === state.storyPhotoMode);
+  });
+
+  document.getElementById("storyPhotoScaleInput").value = String(state.storyPhotoScale);
+  document.getElementById("storyPhotoScaleValue").textContent = `${state.storyPhotoScale}%`;
 }
 
 async function openShareStoryModal(post) {
   const currentTheme = document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
   state.storyTheme = currentTheme;
   state.storyFormat = "story";
-  state.storyPhotoSize = "md";
+  state.storyPhotoMode = "cover";
+  state.storyPhotoScale = 44;
 
   document.getElementById("storyThemeLightBtn").classList.toggle("active", currentTheme === "light");
   document.getElementById("storyThemeDarkBtn").classList.toggle("active", currentTheme === "dark");
@@ -1063,11 +1200,7 @@ async function openShareStoryModal(post) {
     btn.classList.toggle("active", btn.dataset.storyFormat === state.storyFormat);
   });
 
-  const photoRow = document.getElementById("storyPhotoSizeRow");
-  photoRow.hidden = !Boolean(post.image);
-  document.querySelectorAll("#storyPhotoSizeGroup .pill").forEach(btn => {
-    btn.classList.toggle("active", btn.dataset.storyPhoto === state.storyPhotoSize);
-  });
+  syncStoryPhotoControls(post);
 
   document.getElementById("storyShareFeedback").textContent = "";
   document.getElementById("shareStoryModal").hidden = false;
@@ -1584,21 +1717,29 @@ function bindEvents() {
     });
   });
 
-  document.querySelectorAll("#storyPhotoSizeGroup .pill").forEach(btn => {
+  document.querySelectorAll("#storyPhotoModeGroup .pill").forEach(btn => {
     btn.addEventListener("click", async () => {
-      state.storyPhotoSize = btn.dataset.storyPhoto;
-      document.querySelectorAll("#storyPhotoSizeGroup .pill").forEach(b => {
-        b.classList.toggle("active", b === btn);
-      });
+      state.storyPhotoMode = btn.dataset.storyPhotoMode;
       const post = state.posts.find(p => p.id === state.currentPostId);
+      syncStoryPhotoControls(post);
       if (post) await renderStoryCard(post);
     });
+  });
+
+  document.getElementById("storyPhotoScaleInput").addEventListener("input", async e => {
+    state.storyPhotoScale = Number(e.target.value);
+    document.getElementById("storyPhotoScaleValue").textContent = `${state.storyPhotoScale}%`;
+    const post = state.posts.find(p => p.id === state.currentPostId);
+    if (post) await renderStoryCard(post);
   });
 
   document.getElementById("downloadStoryBtn").addEventListener("click", async () => {
     const post = state.posts.find(p => p.id === state.currentPostId);
     const blob = await getStoryBlob();
-    if (!blob) return;
+    if (!blob) {
+      document.getElementById("storyShareFeedback").textContent = "O site da foto bloqueou o download direto. Envie a foto do computador/celular no post para baixar.";
+      return;
+    }
     const slug = (post?.title || "post")
       .toLowerCase()
       .normalize("NFD")

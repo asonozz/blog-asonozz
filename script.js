@@ -46,6 +46,14 @@ let cloud = {
   subscribed: false
 };
 
+let pushState = {
+  ready: false,
+  oneSignal: null,
+  appId: ""
+};
+
+let toastTimer = null;
+
 let state = {
   profile: HAS_FIREBASE
     ? structuredClone(DEFAULT_PROFILE)
@@ -73,6 +81,17 @@ let state = {
 };
 
 // Utilitários seguros
+function showToast(message, duration = 3600) {
+  const el = document.getElementById("siteToast");
+  if (!el) return;
+  el.textContent = message;
+  el.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    el.hidden = true;
+  }, duration);
+}
+
 function getLocalTodayIso() {
   const now = new Date();
   const y = now.getFullYear();
@@ -175,6 +194,131 @@ function compressImageFile(file, maxWidth, callback) {
     img.src = e.target.result;
   };
   reader.readAsDataURL(file);
+}
+
+// === NOTIFICAÇÕES PUSH (ONESIGNAL + VERCEL) ===
+function updateNotifyButtonUI() {
+  const btn = document.getElementById("notifyToggleBtn");
+  if (!btn || !pushState.oneSignal) return;
+  const optedIn = Boolean(pushState.oneSignal.User?.PushSubscription?.optedIn);
+  btn.classList.toggle("is-subscribed", optedIn);
+  btn.title = optedIn
+    ? "Avisos ativados (clique para desativar)"
+    : "Ativar avisos de novos textos";
+}
+
+async function initPushNotifications() {
+  const btn = document.getElementById("notifyToggleBtn");
+  if (!btn) return;
+
+  try {
+    const res = await fetch("/api/notify");
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data.appId) return;
+    pushState.appId = data.appId;
+  } catch {
+    return;
+  }
+
+  btn.hidden = false;
+
+  window.OneSignalDeferred = window.OneSignalDeferred || [];
+  window.OneSignalDeferred.push(async function(OneSignal) {
+    try {
+      await OneSignal.init({
+        appId: pushState.appId,
+        allowLocalhostAsSecureOrigin: true
+      });
+      pushState.oneSignal = OneSignal;
+      pushState.ready = true;
+      updateNotifyButtonUI();
+
+      OneSignal.User.PushSubscription.addEventListener("change", () => {
+        updateNotifyButtonUI();
+      });
+    } catch (err) {
+      console.error("Erro ao iniciar OneSignal:", err);
+    }
+  });
+}
+
+async function togglePushSubscription() {
+  const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const isStandalone = window.matchMedia("(display-mode: standalone)").matches || Boolean(window.navigator.standalone);
+  if (isIos && !isStandalone) {
+    showToast("No iPhone, toque em Compartilhar → Adicionar à Tela de Início para ativar avisos.", 5200);
+    return;
+  }
+
+  if (!("Notification" in window)) {
+    showToast("Este navegador não suporta notificações push.");
+    return;
+  }
+
+  if (Notification.permission === "denied") {
+    showToast("As notificações estão bloqueadas no navegador. Libere no cadeado ao lado do link.", 5200);
+    return;
+  }
+
+  if (!pushState.ready || !pushState.oneSignal) {
+    showToast("Carregando serviço de avisos, tente novamente em 2 segundos...");
+    return;
+  }
+
+  const OneSignal = pushState.oneSignal;
+  const optedIn = Boolean(OneSignal.User?.PushSubscription?.optedIn);
+
+  try {
+    if (optedIn) {
+      await OneSignal.User.PushSubscription.optOut();
+      updateNotifyButtonUI();
+      showToast("Notificações desativadas.");
+    } else {
+      await OneSignal.Notifications.requestPermission();
+      if (Notification.permission === "granted") {
+        await OneSignal.User.PushSubscription.optIn();
+        updateNotifyButtonUI();
+        showToast("Pronto! Você vai receber avisos dos novos textos.");
+      } else {
+        showToast("Permissão não concedida no navegador.");
+      }
+    }
+  } catch (err) {
+    console.error("Erro ao alternar notificação:", err);
+    showToast("Não foi possível alterar as notificações agora.");
+  }
+}
+
+async function sendPushNotificationForPost(post) {
+  if (!cloud.enabled || !cloud.auth?.currentUser) return;
+
+  try {
+    const idToken = await cloud.auth.currentUser.getIdToken();
+    const res = await fetch("/api/notify", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${idToken}`
+      },
+      body: JSON.stringify({
+        heading: `${state.profile.name || "asonozz."} — novo texto`,
+        message: `${post.title}: ${getExcerpt(post.content, 110)}`,
+        url: getPostShareUrl(post.id)
+      })
+    });
+
+    if (res.ok) {
+      showToast("Notificação enviada para os inscritos!");
+    } else {
+      const errData = await res.json().catch(() => ({}));
+      console.error("Falha ao enviar push:", errData);
+      showToast("Texto publicado, mas o envio do aviso push falhou.");
+    }
+  } catch (err) {
+    console.error("Erro ao chamar /api/notify:", err);
+    showToast("Texto publicado, mas não foi possível contactar o serviço de avisos.");
+  }
 }
 
 // === CAMADA DE PERSISTÊNCIA EM TEMPO REAL (FIREBASE) ===
@@ -705,16 +849,11 @@ async function loadImageForCanvas(src) {
   if (src.startsWith("data:") || src.startsWith("blob:")) {
     img = await tryLoadImg(src, false);
   } else {
-    // 1. Tenta direto com permissão para exportar PNG
     img = await tryLoadImg(src, true);
-
-    // 2. Se o servidor externo bloquear CORS, carrega via proxy mantendo o download funcionando
     if (!img) {
       const stripped = src.replace(/^https?:\/\//i, "");
       img = await tryLoadImg(`https://wsrv.nl/?url=${encodeURIComponent(stripped)}&output=jpg`, true);
     }
-
-    // 3. Último recurso: exibe na prévia mesmo se o host bloquear exportação
     if (!img) {
       img = await tryLoadImg(src, false);
     }
@@ -776,7 +915,6 @@ function wrapCanvasText(ctx, text, maxWidth, maxLines) {
         current = word;
         consumed = i + 1;
       } else {
-        // Palavra maior que a linha
         lines.push(word);
         consumed = i + 1;
         if (lines.length === maxLines) {
@@ -805,13 +943,11 @@ function computeAdaptiveTypography(ctx, title, excerpt, maxWidth, totalHeight, f
   const isStory = format === "story";
   const isSquare = format === "square";
 
-  // Define teto e piso proporcionais ao espaço livre restante
   const maxTitleSize = isStory ? 68 : isSquare ? 48 : 56;
   const minTitleSize = isStory ? 34 : 28;
   const maxBodySize = isStory ? 36 : isSquare ? 27 : 30;
   const minBodySize = isStory ? 22 : 19;
 
-  // Escala inicial baseada na altura disponível para texto
   const refHeight = isStory ? 680 : isSquare ? 380 : 460;
   const ratio = Math.max(0.35, Math.min(1.15, totalHeight / refHeight));
 
@@ -821,7 +957,6 @@ function computeAdaptiveTypography(ctx, title, excerpt, maxWidth, totalHeight, f
 
   const titleBudget = Math.max(titleLineH, Math.floor(totalHeight * (excerpt ? 0.44 : 0.85)));
 
-  // Ajusta o tamanho do título até caber no orçamento sem esmagar o trecho
   while (titleSize >= minTitleSize) {
     titleLineH = Math.round(titleSize * 1.16);
     const maxTLines = Math.max(1, Math.min(4, Math.floor(titleBudget / titleLineH)));
@@ -842,7 +977,6 @@ function computeAdaptiveTypography(ctx, title, excerpt, maxWidth, totalHeight, f
   let bodyLines = [];
 
   if (excerpt && bodyBudget >= minBodySize * 1.3) {
-    // Se sobrou pouco espaço (foto grande), reduz o texto para sempre exibir algumas linhas legíveis
     while (bodySize > minBodySize) {
       bodyLineH = Math.round(bodySize * 1.38);
       const possibleLines = Math.floor(bodyBudget / bodyLineH);
@@ -850,7 +984,6 @@ function computeAdaptiveTypography(ctx, title, excerpt, maxWidth, totalHeight, f
       bodySize -= 2;
     }
 
-    // Se o espaço é grande mas o texto é curto, cresce um pouco para equilibrar
     ctx.font = `500 ${bodySize}px 'Coolvetica', 'Quicksand', sans-serif`;
     bodyLineH = Math.round(bodySize * 1.38);
     let maxBLines = Math.max(1, Math.floor(bodyBudget / bodyLineH));
@@ -934,11 +1067,9 @@ async function renderStoryCard(post) {
         watermark: "rgba(184, 29, 39, 0.055)"
       };
 
-  // Fundo base
   ctx.fillStyle = palette.bg;
   ctx.fillRect(0, 0, W, H);
 
-  // Textura pontilhada de caderno
   ctx.fillStyle = palette.dot;
   for (let gx = 48; gx < W; gx += 42) {
     for (let gy = 48; gy < H; gy += 42) {
@@ -948,7 +1079,6 @@ async function renderStoryCard(post) {
     }
   }
 
-  // Cartão central tipo folha de scrapbook
   const cardW = W - padX * 2;
   const cardH = H - cardY - bottomGap;
 
@@ -961,7 +1091,6 @@ async function renderStoryCard(post) {
   ctx.fill();
   ctx.restore();
 
-  // Borda interna tracejada
   ctx.save();
   drawRoundedRect(ctx, padX + 20, cardY + 20, cardW - 40, cardH - 40, 24);
   ctx.setLineDash([12, 12]);
@@ -970,7 +1099,6 @@ async function renderStoryCard(post) {
   ctx.stroke();
   ctx.restore();
 
-  // Marca d'água 愛
   ctx.save();
   ctx.fillStyle = palette.watermark;
   ctx.font = `700 ${format === "square" ? 400 : 520}px serif`;
@@ -984,7 +1112,6 @@ async function renderStoryCard(post) {
   const footerY = cardY + cardH - footerH;
   let cursorY = cardY + (format === "story" ? 64 : 44);
 
-  // Selo hanko vermelho + nome do blog
   const sealSize = format === "story" ? 68 : 58;
   drawRoundedRect(ctx, contentX, cursorY, sealSize, sealSize, 15);
   ctx.fillStyle = palette.crimson;
@@ -1008,8 +1135,6 @@ async function renderStoryCard(post) {
   cursorY += headerH;
 
   const availableH = footerY - cursorY - 20;
-
-  // Foto do post (sempre carregada quando existir e não estiver oculta)
   const loadedImg = (photoMode === "none" || !post.image) ? null : await loadImageForCanvas(post.image);
 
   if (loadedImg) {
@@ -1021,7 +1146,6 @@ async function renderStoryCard(post) {
     let polH = maxPolH;
 
     if (photoMode === "contain") {
-      // Sem corte: moldura acompanha exatamente a proporção original da foto
       const maxImgW = contentW - framePad * 2;
       const maxImgH = Math.max(80, maxPolH - framePad * 2 - polaroidBottomLip);
       const ratio = Math.min(maxImgW / loadedImg.width, maxImgH / loadedImg.height);
@@ -1030,7 +1154,6 @@ async function renderStoryCard(post) {
       polW = drawW + framePad * 2;
       polH = drawH + framePad * 2 + polaroidBottomLip;
     } else {
-      // Preencher: largura acompanha sutilmente fotos bem pequenas para ficar harmônico
       if (photoScale <= 30) {
         polW = Math.round(contentW * (0.76 + ((photoScale - 22) / 8) * 0.24));
       }
@@ -1064,7 +1187,6 @@ async function renderStoryCard(post) {
     }
     ctx.restore();
 
-    // Fita adesiva decorativa no topo da polaroid
     const tapeW = Math.min(136, Math.round(polW * 0.26));
     ctx.fillStyle = isDark ? "rgba(227, 61, 72, 0.35)" : "rgba(184, 29, 39, 0.22)";
     ctx.fillRect(-tapeW / 2, -polH / 2 - 10, tapeW, 24);
@@ -1078,7 +1200,6 @@ async function renderStoryCard(post) {
     cursorY += format === "story" ? 48 : 34;
   }
 
-  // Etiquetas de Data e Categoria (ajustam tamanho se sobrar pouco espaço)
   const remBeforePills = footerY - cursorY;
   const compactMeta = remBeforePills < 260;
   const pillH = compactMeta ? 36 : format === "square" ? 40 : 46;
@@ -1109,7 +1230,6 @@ async function renderStoryCard(post) {
 
   cursorY += pillH + (compactMeta ? 18 : format === "square" ? 26 : 34);
 
-  // Texto adaptável ao espaço exato que sobrou abaixo da foto
   const cleanExcerpt = String(post.content || "")
     .replace(/^>\s?/gm, "")
     .replace(/\s+/g, " ")
@@ -1118,7 +1238,6 @@ async function renderStoryCard(post) {
   const textZoneH = Math.max(80, footerY - cursorY - 16);
   const typo = computeAdaptiveTypography(ctx, post.title, cleanExcerpt, contentW, textZoneH, format);
 
-  // Desenha título
   ctx.textBaseline = "top";
   ctx.fillStyle = palette.text;
   ctx.font = `700 ${typo.titleSize}px 'Coolvetica', 'Quicksand', sans-serif`;
@@ -1127,7 +1246,6 @@ async function renderStoryCard(post) {
     cursorY += typo.titleLineH;
   }
 
-  // Desenha trecho do post
   if (typo.bodyLines.length) {
     cursorY += typo.gapBetween;
     ctx.fillStyle = palette.muted;
@@ -1138,7 +1256,6 @@ async function renderStoryCard(post) {
     }
   }
 
-  // Rodapé interno do cartão
   ctx.textBaseline = "alphabetic";
   ctx.strokeStyle = palette.border;
   ctx.lineWidth = 2;
@@ -1156,7 +1273,7 @@ async function renderStoryCard(post) {
 
   ctx.fillStyle = palette.muted;
   ctx.font = `500 ${format === "square" ? 19 : 21}px 'JetBrains Mono', monospace`;
-  const hostDisplay = window.location.host || "blog-asonozz.vercel.app";
+  const hostDisplay = window.location.host || "asonozz.vercel.app";
   ctx.fillText(`${state.profile.handle || "@asonozz"}  ·  ${hostDisplay}`, contentX, footerY + (format === "square" ? 70 : 82));
 }
 
@@ -1504,6 +1621,13 @@ function openPostModal(post = null) {
   const pinInput = document.getElementById("postPinnedInput");
   if (pinInput) pinInput.checked = Boolean(post?.pinned);
 
+  const notifyRow = document.getElementById("postNotifyRow");
+  const notifyInput = document.getElementById("postNotifyInput");
+  if (notifyRow && notifyInput) {
+    notifyRow.hidden = !cloud.enabled;
+    notifyInput.checked = !post;
+  }
+
   const isDataUrl = post?.image?.startsWith("data:");
   document.getElementById("postImageUrlInput").value = post?.image && !isDataUrl ? post.image : "";
   state.tempPostImage = post?.image || "";
@@ -1673,6 +1797,12 @@ function importBackup(file) {
 
 // Eventos
 function bindEvents() {
+  // Botão do sininho de notificações push
+  const notifyBtn = document.getElementById("notifyToggleBtn");
+  if (notifyBtn) {
+    notifyBtn.addEventListener("click", togglePushSubscription);
+  }
+
   // Atalho secreto 1: 3 cliques rápidos no selo 愛
   let sealClicks = 0;
   let sealTimer = null;
@@ -1951,6 +2081,7 @@ function bindEvents() {
     const date = document.getElementById("postDateInput")?.value || getLocalTodayIso();
     const content = document.getElementById("postContentInput").value.trim();
     const pinned = Boolean(document.getElementById("postPinnedInput")?.checked);
+    const shouldNotify = Boolean(document.getElementById("postNotifyInput")?.checked);
     const image = state.tempPostImage;
     if (!title || !content) return;
 
@@ -1981,6 +2112,11 @@ function bindEvents() {
     }
 
     closePostModal();
+
+    if (shouldNotify) {
+      sendPushNotificationForPost(savedPost);
+    }
+
     if (id) openPostDetail(id);
     else switchView("home", true);
   });
@@ -2295,3 +2431,4 @@ bindEvents();
 initScrollTelling();
 checkUrlHash();
 initFirebaseIfConfigured();
+initPushNotifications();

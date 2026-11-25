@@ -2314,3 +2314,59 @@ body.is-owner .owner-only-flex {
     transition: none !important;
   }
 }
+
+/* Botão de notificações push + aviso flutuante */
+.notify-btn {
+  position: relative;
+}
+
+.notify-btn svg {
+  display: block;
+  transition: rotate 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.notify-btn:hover svg {
+  rotate: -14deg;
+}
+
+.notify-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--crimson);
+  opacity: 0;
+  scale: 0.4;
+  transition: opacity 0.25s ease, scale 0.25s ease;
+}
+
+.notify-btn.is-subscribed {
+  color: var(--crimson);
+  border-color: color-mix(in srgb, var(--crimson) 45%, var(--border));
+}
+
+.notify-btn.is-subscribed .notify-dot {
+  opacity: 1;
+  scale: 1;
+}
+
+.site-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 1200;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid color-mix(in srgb, var(--crimson) 45%, var(--border));
+  border-radius: 999px;
+  padding: 10px 18px;
+  font-size: 0.86rem;
+  font-weight: 600;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.22);
+  max-width: calc(100vw - 32px);
+  text-align: center;
+  animation: asonozzModalPop 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}

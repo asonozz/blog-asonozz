@@ -1,0 +1,16 @@
+{
+  "name": "asonozz.",
+  "short_name": "asonozz.",
+  "description": "um pequeno quarto na internet",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7f2ec",
+  "theme_color": "#b81d27",
+  "icons": [
+    {
+      "src": "/favicon.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

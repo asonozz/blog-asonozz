@@ -2557,3 +2557,309 @@ body.is-owner .owner-only-flex {
     animation: none !important;
   }
 }
+
+/* =========================================================
+   MODO FOCO, CLIMA/TRILHA, REAÇÕES 愛, ANTERIOR/PRÓXIMO,
+   FILTROS DE MURAL/DEVANEIOS E LIVRO DE VISITAS
+   ========================================================= */
+   .post-top-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 18px;
+  }
+  
+  .post-top-bar .btn-back {
+    margin-bottom: 0;
+  }
+  
+  .focus-toggle-btn.is-active {
+    background: var(--crimson);
+    border-color: var(--crimson);
+    color: #fff;
+  }
+  
+  body.focus-mode .sidebar {
+    display: none;
+  }
+  
+  body.focus-mode .page-layout {
+    grid-template-columns: minmax(0, 760px);
+    justify-content: center;
+  }
+  
+  body.focus-mode .site-header {
+    opacity: 0.72;
+    transition: opacity 0.25s ease;
+  }
+  
+  body.focus-mode .site-header:hover {
+    opacity: 1;
+  }
+  
+  /* Clima do dia + trilha sonora nos posts */
+  .post-mood-strip {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 22px;
+  }
+  
+  .post-card-extras {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 10px 0 2px;
+  }
+  
+  .mood-pill,
+  .song-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 11px;
+    border-radius: 999px;
+    font-family: var(--font-mono);
+    font-size: 0.74rem;
+    border: 1px solid var(--border);
+    background: var(--surface-subtle);
+    color: var(--text-muted);
+    text-decoration: none;
+    max-width: 100%;
+  }
+  
+  .mood-pill {
+    border-style: dashed;
+  }
+  
+  .song-pill {
+    color: var(--text);
+    border-color: color-mix(in srgb, var(--crimson) 35%, var(--border));
+  }
+  
+  a.song-pill:hover {
+    border-color: var(--crimson);
+    color: var(--crimson);
+  }
+  
+  /* Botão de reação rápida 愛 */
+  @keyframes asonozzStampPop {
+    0% { transform: scale(1); }
+    40% { transform: scale(1.16) rotate(-4deg); }
+    100% { transform: scale(1); }
+  }
+  
+  .post-reaction-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-top: 28px;
+    padding-top: 20px;
+    border-top: 1px dashed var(--border);
+  }
+  
+  .reaction-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 16px;
+    border-radius: 999px;
+    border: 1.5px solid color-mix(in srgb, var(--crimson) 42%, var(--border));
+    background: var(--surface-subtle);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.88rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.2s ease, border-color 0.2s ease, background-color 0.2s ease, color 0.2s ease;
+  }
+  
+  .reaction-btn:hover {
+    border-color: var(--crimson);
+    transform: translateY(-1px);
+  }
+  
+  .reaction-btn .reaction-seal {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 7px;
+    background: color-mix(in srgb, var(--crimson) 14%, transparent);
+    color: var(--crimson);
+    font-family: serif;
+    font-weight: 700;
+    font-size: 0.95rem;
+  }
+  
+  .reaction-btn .reaction-count {
+    font-family: var(--font-mono);
+    font-size: 0.84rem;
+    padding-left: 8px;
+    border-left: 1px solid var(--border);
+  }
+  
+  .reaction-btn.is-reacted {
+    background: var(--crimson);
+    border-color: var(--crimson);
+    color: #fff;
+  }
+  
+  .reaction-btn.is-reacted .reaction-seal {
+    background: rgba(255, 255, 255, 0.22);
+    color: #fff;
+  }
+  
+  .reaction-btn.is-reacted .reaction-count {
+    border-left-color: rgba(255, 255, 255, 0.35);
+  }
+  
+  .reaction-btn.just-stamped {
+    animation: asonozzStampPop 0.38s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  
+  .post-card-stats {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+  }
+  
+  .reaction-mini-tag {
+    font-family: var(--font-mono);
+    font-size: 0.76rem;
+    color: var(--crimson);
+  }
+  
+  /* Navegação Anterior / Próximo texto */
+  .post-prev-next {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    margin: 22px 0 28px;
+  }
+  
+  .post-prev-next:empty {
+    display: none;
+  }
+  
+  .prev-next-card {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    padding: 15px 18px;
+    border-radius: 14px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+    font-family: inherit;
+    transition: border-color 0.22s ease, transform 0.22s ease;
+  }
+  
+  .prev-next-card:hover {
+    border-color: var(--crimson);
+    transform: translateY(-2px);
+  }
+  
+  .prev-next-card.is-next {
+    text-align: right;
+    margin-left: auto;
+    width: 100%;
+  }
+  
+  .prev-next-label {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--crimson);
+  }
+  
+  .prev-next-title {
+    font-weight: 700;
+    font-size: 0.94rem;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  
+  .prev-next-spacer {
+    display: block;
+  }
+  
+  @media (max-width: 640px) {
+    .post-prev-next {
+      grid-template-columns: 1fr;
+    }
+    .prev-next-card.is-next {
+      text-align: left;
+    }
+    .prev-next-spacer {
+      display: none;
+    }
+  }
+  
+  /* Filtros no Mural e Devaneios + edição de Devaneio */
+  .section-filters {
+    margin-bottom: 20px;
+  }
+  
+  .mural-tag-pill {
+    display: inline-block;
+    margin-top: 6px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    background: var(--surface-subtle);
+    color: var(--crimson);
+    border: 1px solid color-mix(in srgb, var(--crimson) 28%, var(--border));
+  }
+  
+  .project-card-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  
+  .project-edit {
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 0.9rem;
+    padding: 2px 6px;
+    border-radius: 6px;
+    transition: color 0.2s ease, background-color 0.2s ease;
+  }
+  
+  .project-edit:hover {
+    color: var(--crimson);
+    background: var(--surface-subtle);
+  }
+  
+  /* Livro de visitas (Guestbook) */
+  .guestbook-section {
+    margin-top: 28px;
+  }
+  
+  .guestbook-site-tag {
+    display: inline-block;
+    margin-left: 8px;
+    font-family: var(--font-mono);
+    font-size: 0.74rem;
+    color: var(--crimson);
+    text-decoration: none;
+  }
+  
+  a.guestbook-site-tag:hover {
+    text-decoration: underline;
+  }

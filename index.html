@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Great+Vibes&family=JetBrains+Mono:wght@400;500&family=Quicksand:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=9">
+  <link rel="stylesheet" href="style.css?v=11">
   <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
 </head>
 <body>
@@ -24,7 +24,7 @@
         <span class="owner-dot"></span>
         <span>Modo dono ativo <strong>(@asonozz)</strong></span>
         <button class="btn-pill-mini" id="pendingBadgeBtn">
-          <span id="pendingCountText">0 bilhetinhos pendentes</span>
+          <span id="pendingCountText">0 recados pendentes</span>
         </button>
       </div>
       <button class="btn-pill-mini" id="logoutOwnerBtn">Ver como visitante (Sair)</button>
@@ -148,16 +148,24 @@
           <button class="btn btn-primary owner-only" id="addPhotoBtn">+ Adicionar foto</button>
         </div>
 
+        <div class="category-filters section-filters" id="muralFilters" hidden></div>
         <div class="mural-grid" id="muralGrid"></div>
         <div class="empty-state" id="muralEmptyState" hidden>
           <p>A parede ainda está vazia.</p>
         </div>
       </section>
 
-      <!-- VIEW: LEITURA DE POST + BILHETINHOS -->
+      <!-- VIEW: LEITURA DE POST + ANTERIOR/PRÓXIMO + BILHETINHOS -->
       <section id="view-post" class="view" hidden>
-        <button class="btn-back" id="backToHomeBtn">← Voltar para o caderno</button>
+        <div class="post-top-bar">
+          <button class="btn-back" id="backToHomeBtn">← Voltar para o caderno</button>
+          <button class="btn btn-outline btn-sm focus-toggle-btn" id="toggleFocusModeBtn" title="Esconder barra lateral para ler com foco">Modo foco</button>
+        </div>
+
         <article class="post-detail" id="postDetailContent"></article>
+
+        <!-- Navegação Anterior / Próximo -->
+        <nav class="post-prev-next" id="postPrevNext" aria-label="Navegação entre textos"></nav>
 
         <!-- Bilhetinhos (Comentários com moderação) -->
         <section class="comments-section" id="commentsSection">
@@ -206,15 +214,48 @@
           </div>
           <button class="btn btn-primary owner-only" id="addProjectBtn">+ Novo devaneio</button>
         </div>
+
+        <div class="category-filters section-filters" id="projectFilters" hidden></div>
         <div class="projects-grid" id="projectsGrid"></div>
         <div class="empty-state" id="projectsEmptyState" hidden>
           <p>Nenhum devaneio anotado ainda.</p>
         </div>
       </section>
 
-      <!-- VIEW: SOBRE -->
+      <!-- VIEW: SOBRE + LIVRO DE VISITAS -->
       <section id="view-about" class="view" hidden>
         <div class="about-card" id="aboutContent"></div>
+
+        <section class="comments-section guestbook-section" id="guestbookSection">
+          <div class="comments-header">
+            <span class="section-kicker">⋆˚࿔ caderno de assinaturas</span>
+            <h3 class="comments-title">Livro de visitas</h3>
+            <p class="muted-small">Passou pelo quarto? Deixe um oi, uma frase ou uma música recomendada. As assinaturas aparecem aqui depois que @asonozz aprovar.</p>
+          </div>
+
+          <div class="comments-list" id="guestbookList"></div>
+
+          <form class="comment-form" id="guestbookForm">
+            <div class="form-row">
+              <div class="form-group">
+                <label for="guestbookAuthorInput">Seu nome ou apelido</label>
+                <input type="text" id="guestbookAuthorInput" required maxlength="40" placeholder="Como posso te chamar?">
+              </div>
+              <div class="form-group">
+                <label for="guestbookSiteInput">@ ou site (opcional)</label>
+                <input type="text" id="guestbookSiteInput" maxlength="100" placeholder="@seuuser ou https://...">
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="guestbookTextInput">Sua assinatura</label>
+              <textarea id="guestbookTextInput" rows="3" required maxlength="400" placeholder="Deixe uma mensagem no livro de visitas..."></textarea>
+            </div>
+            <div class="comment-form-footer">
+              <span class="comment-feedback" id="guestbookFeedback" aria-live="polite"></span>
+              <button type="submit" class="btn btn-primary">Assinar caderno</button>
+            </div>
+          </form>
+        </section>
       </section>
 
     </main>
@@ -281,7 +322,7 @@
 
       <div class="paper-card compact-card backup-card owner-only-block" id="backupCard">
         <h3 class="card-label">Backup do dono</h3>
-        <p class="muted-small">Salve uma cópia de segurança dos textos, mural, devaneios e bilhetinhos.</p>
+        <p class="muted-small">Salve uma cópia de segurança dos textos, mural, devaneios, reações e recados.</p>
         <div class="backup-actions">
           <button class="btn btn-outline btn-sm" id="exportDataBtn">Exportar .json</button>
           <label class="btn btn-outline btn-sm file-label">
@@ -389,11 +430,11 @@
     </div>
   </div>
 
-  <!-- MODAL: MODERAÇÃO DE BILHETINHOS -->
+  <!-- MODAL: MODERAÇÃO DE BILHETINHOS E LIVRO DE VISITAS -->
   <div class="modal-backdrop" id="moderationModal" hidden>
     <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="moderationModalTitle">
       <div class="modal-header">
-        <h2 id="moderationModalTitle">Bilhetinhos pendentes</h2>
+        <h2 id="moderationModalTitle">Recados pendentes</h2>
         <button class="btn-icon" id="closeModerationModalBtn" aria-label="Fechar">✕</button>
       </div>
       <div class="moderation-list" id="moderationList"></div>
@@ -429,6 +470,30 @@
             <label for="postDateInput">Data do post</label>
             <input type="date" id="postDateInput" required>
           </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="postMoodInput">Clima / humor (opcional)</label>
+            <input type="text" id="postMoodInput" list="moodSuggestions" maxlength="40" placeholder="Ex: madrugada calma">
+            <datalist id="moodSuggestions">
+              <option value="madrugada calma"></option>
+              <option value="pensando alto"></option>
+              <option value="código & café"></option>
+              <option value="nostálgico"></option>
+              <option value="dia chuvoso"></option>
+              <option value="sem pressa"></option>
+            </datalist>
+          </div>
+          <div class="form-group">
+            <label for="postSongInput">Trilha do texto (opcional)</label>
+            <input type="text" id="postSongInput" maxlength="80" placeholder="Ex: Frank Ocean — Nights">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="postSongUrlInput">Link da música (Spotify / YouTube, opcional)</label>
+          <input type="url" id="postSongUrlInput" placeholder="https://open.spotify.com/...">
         </div>
 
         <div class="form-group">
@@ -494,9 +559,15 @@
           </div>
         </div>
 
-        <div class="form-group">
-          <label for="photoCaptionInput">Legenda na polaroid (opcional)</label>
-          <input type="text" id="photoCaptionInput" placeholder="Uma frase curta, data ou memória...">
+        <div class="form-row">
+          <div class="form-group">
+            <label for="photoCaptionInput">Legenda na polaroid (opcional)</label>
+            <input type="text" id="photoCaptionInput" placeholder="Uma frase curta, data ou memória...">
+          </div>
+          <div class="form-group">
+            <label for="photoTagInput">Coleção / tag (opcional)</label>
+            <input type="text" id="photoTagInput" maxlength="28" placeholder="Ex: noite, setup, referências">
+          </div>
         </div>
 
         <div class="modal-footer">
@@ -507,7 +578,7 @@
     </div>
   </div>
 
-  <!-- MODAL: NOVO DEVANEIO -->
+  <!-- MODAL: NOVO / EDITAR DEVANEIO -->
   <div class="modal-backdrop" id="projectModal" hidden>
     <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="projectModalTitle">
       <div class="modal-header">
@@ -515,6 +586,8 @@
         <button class="btn-icon" id="closeProjectModalBtn" aria-label="Fechar">✕</button>
       </div>
       <form id="projectForm" class="modal-form">
+        <input type="hidden" id="projectIdInput">
+
         <div class="form-row">
           <div class="form-group">
             <label for="projectTitleInput">Nome do projeto ou ideia</label>
@@ -522,7 +595,14 @@
           </div>
           <div class="form-group">
             <label for="projectStatusInput">Fase atual</label>
-            <input type="text" id="projectStatusInput" placeholder="em construção, rascunho, pausado...">
+            <input type="text" id="projectStatusInput" list="projectStatusSuggestions" placeholder="em construção, rascunho, pausado...">
+            <datalist id="projectStatusSuggestions">
+              <option value="em construção"></option>
+              <option value="rascunho"></option>
+              <option value="pausado"></option>
+              <option value="concluído"></option>
+              <option value="ideia"></option>
+            </datalist>
           </div>
         </div>
 
@@ -652,6 +732,6 @@ madrugadas calmas"></textarea>
   <!-- Aviso flutuante (toast) -->
   <div class="site-toast" id="siteToast" role="status" aria-live="polite" hidden></div>
 
-  <script src="script.js?v=10"></script>
+  <script src="script.js?v=11"></script>
 </body>
 </html>

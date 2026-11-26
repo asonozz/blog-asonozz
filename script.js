@@ -9,6 +9,7 @@ const FIREBASE_CONFIG = {
 };
 
 const HAS_FIREBASE = Boolean(FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.projectId);
+const GUESTBOOK_POST_ID = "__guestbook__";
 
 const STORAGE_KEYS = {
   profile: "asonozz_v3_profile",
@@ -16,6 +17,9 @@ const STORAGE_KEYS = {
   photos: "asonozz_v3_photos",
   projects: "asonozz_v3_projects",
   comments: "asonozz_v3_comments",
+  reactions: "asonozz_v3_reactions",
+  myReactions: "asonozz_v3_my_reactions",
+  voterId: "asonozz_v3_voter_id",
   theme: "asonozz_v3_theme",
   demoOwner: "asonozz_v3_demo_owner"
 };
@@ -62,9 +66,14 @@ let state = {
   photos: HAS_FIREBASE ? [] : loadFromStorage(STORAGE_KEYS.photos, []),
   projects: HAS_FIREBASE ? [] : loadFromStorage(STORAGE_KEYS.projects, []),
   comments: HAS_FIREBASE ? [] : loadFromStorage(STORAGE_KEYS.comments, []),
+  reactions: HAS_FIREBASE ? [] : loadFromStorage(STORAGE_KEYS.reactions, []),
+  myReactions: loadFromStorage(STORAGE_KEYS.myReactions, {}),
   isOwner: false,
+  focusMode: false,
   activeView: "home",
   activeCategory: "todos",
+  activeMuralTag: "todos",
+  activeProjectStatus: "todos",
   searchQuery: "",
   currentPostId: null,
   pendingPostIdFromHash: null,
@@ -90,6 +99,21 @@ function showToast(message, duration = 3600) {
   toastTimer = setTimeout(() => {
     el.hidden = true;
   }, duration);
+}
+
+function getVoterId() {
+  let id = localStorage.getItem(STORAGE_KEYS.voterId);
+  if (!id) {
+    id = "v_" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+    localStorage.setItem(STORAGE_KEYS.voterId, id);
+  }
+  return id;
+}
+
+function sanitizeExternalUrl(url = "") {
+  const trimmed = String(url || "").trim();
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  return "";
 }
 
 function getLocalTodayIso() {
@@ -207,6 +231,81 @@ function compressImageFile(file, maxWidth, callback) {
     img.src = e.target.result;
   };
   reader.readAsDataURL(file);
+}
+
+// === REAÇÕES RÁPIDAS (愛) ===
+function getReactionCount(postId) {
+  return state.reactions.filter(r => r.postId === postId).length;
+}
+
+function hasReactedToPost(postId) {
+  const voterId = getVoterId();
+  return Boolean(
+    state.myReactions[postId] ||
+    state.reactions.some(r => r.postId === postId && r.voterId === voterId)
+  );
+}
+
+function refreshPostReactionUI(postId) {
+  const btn = document.getElementById("reactPostBtn");
+  if (!btn || state.currentPostId !== postId) return;
+  const count = getReactionCount(postId);
+  const reacted = hasReactedToPost(postId);
+  btn.classList.toggle("is-reacted", reacted);
+  const labelEl = btn.querySelector(".reaction-label");
+  const countEl = btn.querySelector(".reaction-count");
+  if (labelEl) labelEl.textContent = reacted ? "Selo deixado" : "Deixar um selo";
+  if (countEl) countEl.textContent = String(count);
+}
+
+async function stampPostReaction(postId) {
+  if (hasReactedToPost(postId)) {
+    showToast("Você já deixou seu selo 愛 neste texto.");
+    return;
+  }
+
+  const voterId = getVoterId();
+  const reaction = {
+    id: `${postId}__${voterId}`,
+    postId,
+    voterId,
+    createdAt: Date.now()
+  };
+
+  state.myReactions[postId] = true;
+  saveToStorage(STORAGE_KEYS.myReactions, state.myReactions);
+
+  if (!state.reactions.some(r => r.id === reaction.id)) {
+    state.reactions.push(reaction);
+  }
+
+  refreshPostReactionUI(postId);
+  renderPosts();
+
+  const btn = document.getElementById("reactPostBtn");
+  if (btn) {
+    btn.classList.remove("just-stamped");
+    void btn.offsetWidth;
+    btn.classList.add("just-stamped");
+  }
+
+  const ok = await persistDoc("reactions", reaction, true);
+  if (ok) {
+    showToast("Selo 愛 carimbado no texto!");
+  } else {
+    showToast("Selo salvo neste navegador (confira a regra de reactions no Firebase).");
+  }
+}
+
+// === MODO FOCO DE LEITURA ===
+function setFocusMode(enabled) {
+  state.focusMode = Boolean(enabled);
+  document.body.classList.toggle("focus-mode", state.focusMode);
+  const btn = document.getElementById("toggleFocusModeBtn");
+  if (btn) {
+    btn.classList.toggle("is-active", state.focusMode);
+    btn.textContent = state.focusMode ? "Sair do foco" : "Modo foco";
+  }
 }
 
 // === CARTÃO LAST.FM (OUVINDO AGORA / ÚLTIMA OUVIDA) ===
@@ -511,11 +610,24 @@ function subscribeToCloud() {
         .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
       syncOwnerUI();
       renderPosts();
+      renderGuestbook();
       if (!document.getElementById("moderationModal").hidden) {
         renderModerationModal();
       }
     },
     err => console.error("Erro ao sincronizar bilhetinhos:", err)
+  );
+
+  onSnapshot(
+    collection(cloud.db, "reactions"),
+    snap => {
+      state.reactions = snap.docs.map(d => d.data());
+      renderPosts();
+      if (state.activeView === "post" && state.currentPostId) {
+        refreshPostReactionUI(state.currentPostId);
+      }
+    },
+    err => console.warn("Reações ainda não liberadas nas regras do Firestore:", err.message)
   );
 }
 
@@ -535,12 +647,13 @@ async function persistProfile() {
   }
 }
 
-async function persistDoc(colName, item) {
+async function persistDoc(colName, item, silent = false) {
   if (!cloud.enabled) {
     if (colName === "posts") saveToStorage(STORAGE_KEYS.posts, state.posts);
     if (colName === "photos") saveToStorage(STORAGE_KEYS.photos, state.photos);
     if (colName === "projects") saveToStorage(STORAGE_KEYS.projects, state.projects);
     if (colName === "comments") saveToStorage(STORAGE_KEYS.comments, state.comments);
+    if (colName === "reactions") saveToStorage(STORAGE_KEYS.reactions, state.reactions);
     return true;
   }
 
@@ -549,7 +662,9 @@ async function persistDoc(colName, item) {
     return true;
   } catch (err) {
     console.error(`Erro ao salvar em ${colName}:`, err);
-    alert("Não foi possível salvar no Firebase. Confira sua conexão ou se as regras de segurança estão com o seu UID certo.");
+    if (!silent) {
+      alert("Não foi possível salvar no Firebase. Confira sua conexão ou se as regras de segurança estão com o seu UID certo.");
+    }
     return false;
   }
 }
@@ -560,6 +675,7 @@ async function removeDoc(colName, id) {
     if (colName === "photos") saveToStorage(STORAGE_KEYS.photos, state.photos);
     if (colName === "projects") saveToStorage(STORAGE_KEYS.projects, state.projects);
     if (colName === "comments") saveToStorage(STORAGE_KEYS.comments, state.comments);
+    if (colName === "reactions") saveToStorage(STORAGE_KEYS.reactions, state.reactions);
     return true;
   }
   if (!state.isOwner) return false;
@@ -578,12 +694,13 @@ async function removeDoc(colName, id) {
 function syncOwnerUI() {
   document.body.classList.toggle("is-owner", state.isOwner);
   const pendingCount = state.comments.filter(c => !c.approved).length;
-  const label = pendingCount === 1 ? "1 bilhetinho pendente" : `${pendingCount} bilhetinhos pendentes`;
+  const label = pendingCount === 1 ? "1 recado pendente" : `${pendingCount} recados pendentes`;
   document.getElementById("pendingCountText").textContent = label;
 
   if (state.activeView === "post" && state.currentPostId) {
     renderCommentsForPost(state.currentPostId);
   }
+  renderGuestbook();
 }
 
 function checkUrlHash() {
@@ -625,6 +742,7 @@ function renderAll() {
   renderPosts();
   renderMural();
   renderProjects();
+  renderGuestbook();
   syncOwnerUI();
   if (state.activeView === "archive") renderArchive();
   if (state.activeView === "post" && state.currentPostId) openPostDetail(state.currentPostId, false);
@@ -724,6 +842,14 @@ function renderProfile() {
   renderCoverStats();
 }
 
+function getChronologicalPosts() {
+  return [...state.posts].sort((a, b) => {
+    const dateDiff = String(b.date || "").localeCompare(String(a.date || ""));
+    if (dateDiff !== 0) return dateDiff;
+    return (b.createdAt || 0) - (a.createdAt || 0);
+  });
+}
+
 function renderPosts() {
   const container = document.getElementById("postsList");
   const emptyState = document.getElementById("emptyState");
@@ -736,7 +862,9 @@ function renderPosts() {
         !q ||
         post.title.toLowerCase().includes(q) ||
         post.content.toLowerCase().includes(q) ||
-        post.category.toLowerCase().includes(q);
+        post.category.toLowerCase().includes(q) ||
+        (post.mood || "").toLowerCase().includes(q) ||
+        (post.song || "").toLowerCase().includes(q);
       return matchesCat && matchesQuery;
     })
     .sort((a, b) => {
@@ -758,6 +886,9 @@ function renderPosts() {
     .map(post => {
       const approvedCount = state.comments.filter(c => c.postId === post.id && c.approved).length;
       const countText = approvedCount === 1 ? "1 bilhetinho" : `${approvedCount} bilhetinhos`;
+      const reactionCount = getReactionCount(post.id);
+      const hasExtras = Boolean(post.mood || post.song);
+
       return `
         <article class="post-card ${post.pinned ? "is-pinned" : ""}" data-post-id="${escapeHtml(post.id)}">
           ${post.image ? `<div class="post-card-cover-wrap"><img class="post-card-cover" src="${escapeHtml(post.image)}" alt="${escapeHtml(post.title)}"></div>` : ""}
@@ -771,9 +902,18 @@ function renderPosts() {
             </div>
             <h3 class="post-title">${escapeHtml(post.title)}</h3>
             <p class="post-excerpt">${escapeHtml(getExcerpt(post.content))}</p>
+            ${hasExtras ? `
+              <div class="post-card-extras">
+                ${post.mood ? `<span class="mood-pill">⋆ ${escapeHtml(post.mood)}</span>` : ""}
+                ${post.song ? `<span class="song-pill">♪ ${escapeHtml(post.song)}</span>` : ""}
+              </div>
+            ` : ""}
             <div class="post-card-footer">
               <span class="read-more">Ler página inteira →</span>
-              <span class="comment-count-tag">${countText}</span>
+              <span class="post-card-stats">
+                ${reactionCount > 0 ? `<span class="reaction-mini-tag">愛 ${reactionCount}</span>` : ""}
+                <span class="comment-count-tag">${countText}</span>
+              </span>
             </div>
           </div>
         </article>
@@ -788,22 +928,71 @@ function renderPosts() {
   renderCoverStats();
 }
 
+function renderMuralFilters() {
+  const bar = document.getElementById("muralFilters");
+  if (!bar) return;
+
+  const tagsMap = new Map();
+  state.photos.forEach(p => {
+    const clean = String(p.tag || "").trim();
+    if (clean) {
+      const key = clean.toLowerCase();
+      if (!tagsMap.has(key)) tagsMap.set(key, clean);
+    }
+  });
+
+  if (tagsMap.size === 0) {
+    state.activeMuralTag = "todos";
+    bar.hidden = true;
+    bar.innerHTML = "";
+    return;
+  }
+
+  if (state.activeMuralTag !== "todos" && !tagsMap.has(state.activeMuralTag)) {
+    state.activeMuralTag = "todos";
+  }
+
+  bar.hidden = false;
+  const pills = [
+    `<button class="pill ${state.activeMuralTag === "todos" ? "active" : ""}" data-mural-tag="todos">Todas</button>`,
+    ...[...tagsMap.entries()]
+      .sort((a, b) => a[1].localeCompare(b[1]))
+      .map(([key, label]) => `<button class="pill ${state.activeMuralTag === key ? "active" : ""}" data-mural-tag="${escapeHtml(key)}">${escapeHtml(label)}</button>`)
+  ];
+  bar.innerHTML = pills.join("");
+
+  bar.querySelectorAll("[data-mural-tag]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      state.activeMuralTag = btn.dataset.muralTag;
+      renderMural();
+    });
+  });
+}
+
 function renderMural() {
+  renderMuralFilters();
+
   const grid = document.getElementById("muralGrid");
   const empty = document.getElementById("muralEmptyState");
 
-  if (!state.photos.length) {
+  const visiblePhotos = state.photos.filter(photo => {
+    if (state.activeMuralTag === "todos") return true;
+    return String(photo.tag || "").trim().toLowerCase() === state.activeMuralTag;
+  });
+
+  if (!visiblePhotos.length) {
     grid.innerHTML = "";
     empty.hidden = false;
   } else {
     empty.hidden = true;
-    grid.innerHTML = state.photos
+    grid.innerHTML = visiblePhotos
       .map(photo => `
         <figure class="mural-item" data-photo-id="${escapeHtml(photo.id)}">
           <img src="${escapeHtml(photo.url)}" alt="${escapeHtml(photo.caption || "Foto do mural")}" loading="lazy">
           <figcaption class="mural-caption-wrap">
             ${photo.caption ? `<p class="mural-caption">${escapeHtml(photo.caption)}</p>` : ""}
             <span class="mural-date">${formatDate(photo.date)}</span>
+            ${photo.tag ? `<div><span class="mural-tag-pill">#${escapeHtml(photo.tag)}</span></div>` : ""}
           </figcaption>
         </figure>
       `)
@@ -841,6 +1030,40 @@ function renderSidebarMuralPreview() {
   });
 }
 
+function renderPostPrevNext(postId) {
+  const navEl = document.getElementById("postPrevNext");
+  if (!navEl) return;
+
+  const ordered = getChronologicalPosts();
+  const idx = ordered.findIndex(p => p.id === postId);
+  if (idx === -1 || ordered.length <= 1) {
+    navEl.innerHTML = "";
+    return;
+  }
+
+  const olderPost = ordered[idx + 1] || null;
+  const newerPost = ordered[idx - 1] || null;
+
+  navEl.innerHTML = `
+    ${olderPost ? `
+      <button type="button" class="prev-next-card is-prev" data-nav-post-id="${escapeHtml(olderPost.id)}">
+        <span class="prev-next-label">← Texto anterior</span>
+        <span class="prev-next-title">${escapeHtml(olderPost.title)}</span>
+      </button>
+    ` : `<span class="prev-next-spacer"></span>`}
+    ${newerPost ? `
+      <button type="button" class="prev-next-card is-next" data-nav-post-id="${escapeHtml(newerPost.id)}">
+        <span class="prev-next-label">Próximo texto →</span>
+        <span class="prev-next-title">${escapeHtml(newerPost.title)}</span>
+      </button>
+    ` : `<span class="prev-next-spacer"></span>`}
+  `;
+
+  navEl.querySelectorAll("[data-nav-post-id]").forEach(btn => {
+    btn.addEventListener("click", () => openPostDetail(btn.dataset.navPostId, true));
+  });
+}
+
 function openPostDetail(postId, shouldSwitch = true) {
   const post = state.posts.find(p => p.id === postId);
   if (!post) return;
@@ -852,6 +1075,11 @@ function openPostDetail(postId, shouldSwitch = true) {
     history.replaceState(null, "", targetHash);
   }
 
+  const safeSongUrl = sanitizeExternalUrl(post.songUrl);
+  const hasMoodOrSong = Boolean(post.mood || post.song);
+  const reactionCount = getReactionCount(post.id);
+  const reacted = hasReactedToPost(post.id);
+
   const detailEl = document.getElementById("postDetailContent");
   detailEl.innerHTML = `
     <div class="post-meta">
@@ -862,8 +1090,29 @@ function openPostDetail(postId, shouldSwitch = true) {
       <span>${estimateReadingTime(post.content)}</span>
     </div>
     <h1 class="post-detail-title">${escapeHtml(post.title)}</h1>
+
+    ${hasMoodOrSong ? `
+      <div class="post-mood-strip">
+        ${post.mood ? `<span class="mood-pill">⋆ clima: ${escapeHtml(post.mood)}</span>` : ""}
+        ${post.song ? (
+          safeSongUrl
+            ? `<a class="song-pill" href="${escapeHtml(safeSongUrl)}" target="_blank" rel="noopener noreferrer">♪ ${escapeHtml(post.song)} ↗</a>`
+            : `<span class="song-pill">♪ ${escapeHtml(post.song)}</span>`
+        ) : ""}
+      </div>
+    ` : ""}
+
     ${post.image ? `<img class="post-detail-cover" src="${escapeHtml(post.image)}" alt="${escapeHtml(post.title)}">` : ""}
     <div class="post-body">${formatPostContent(post.content)}</div>
+
+    <div class="post-reaction-bar">
+      <button type="button" class="reaction-btn ${reacted ? "is-reacted" : ""}" id="reactPostBtn">
+        <span class="reaction-seal" aria-hidden="true">愛</span>
+        <span class="reaction-label">${reacted ? "Selo deixado" : "Deixar um selo"}</span>
+        <span class="reaction-count">${reactionCount}</span>
+      </button>
+      <span class="muted-small">passou por aqui? carimbe a página</span>
+    </div>
 
     <div class="post-share-bar">
       <span class="post-share-label">⋆ compartilhar esta página</span>
@@ -880,6 +1129,8 @@ function openPostDetail(postId, shouldSwitch = true) {
     </div>
   `;
 
+  document.getElementById("reactPostBtn").addEventListener("click", () => stampPostReaction(post.id));
+
   const copyBtn = document.getElementById("copyPostLinkBtn");
   copyBtn.addEventListener("click", async () => {
     try {
@@ -895,6 +1146,8 @@ function openPostDetail(postId, shouldSwitch = true) {
   document.getElementById("togglePinPostBtn").addEventListener("click", () => togglePinPost(post.id));
   document.getElementById("editCurrentPostBtn").addEventListener("click", () => openPostModal(post));
   document.getElementById("deleteCurrentPostBtn").addEventListener("click", () => deletePost(post.id));
+
+  renderPostPrevNext(postId);
 
   if (shouldSwitch) {
     document.getElementById("commentFeedback").textContent = "";
@@ -1459,6 +1712,57 @@ async function togglePinPost(postId) {
   }
 }
 
+// === BILHETINHOS E LIVRO DE VISITAS ===
+function renderNoteItemsHtml(items) {
+  return items
+    .map(c => {
+      const safeSiteUrl = sanitizeExternalUrl(c.site);
+      const siteBadge = c.site
+        ? (safeSiteUrl
+            ? `<a class="guestbook-site-tag" href="${escapeHtml(safeSiteUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(c.site.replace(/^https?:\/\//i, ""))} ↗</a>`
+            : `<span class="guestbook-site-tag">${escapeHtml(c.site)}</span>`)
+        : "";
+
+      return `
+        <div class="comment-note ${c.approved ? "" : "is-pending"}">
+          <div class="comment-note-head">
+            <div>
+              <span class="comment-author">${escapeHtml(c.author)}</span>
+              ${siteBadge}
+              ${c.approved ? "" : `<span class="pending-pill">aguardando aprovação</span>`}
+            </div>
+            <span class="comment-date">${formatDate(c.date)}</span>
+          </div>
+          <p class="comment-body">${escapeHtml(c.text).replaceAll("\n", "<br>")}</p>
+          ${c.reply ? `
+            <div class="owner-reply-box">
+              <span class="owner-reply-badge">愛 ${escapeHtml(state.profile.handle)} respondeu:</span>
+              <p>${escapeHtml(c.reply).replaceAll("\n", "<br>")}</p>
+            </div>
+          ` : ""}
+          <div class="comment-owner-actions owner-only-flex">
+            ${c.approved ? "" : `<button class="btn btn-primary btn-sm" data-approve-id="${escapeHtml(c.id)}">Aprovar</button>`}
+            <button class="btn btn-outline btn-sm" data-reply-id="${escapeHtml(c.id)}">${c.reply ? "Editar resposta" : "Responder"}</button>
+            <button class="btn btn-danger btn-sm" data-delete-comment-id="${escapeHtml(c.id)}">Apagar</button>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function bindNoteOwnerButtons(container) {
+  container.querySelectorAll("[data-approve-id]").forEach(btn => {
+    btn.addEventListener("click", () => approveComment(btn.dataset.approveId));
+  });
+  container.querySelectorAll("[data-reply-id]").forEach(btn => {
+    btn.addEventListener("click", () => replyToComment(btn.dataset.replyId));
+  });
+  container.querySelectorAll("[data-delete-comment-id]").forEach(btn => {
+    btn.addEventListener("click", () => deleteComment(btn.dataset.deleteCommentId));
+  });
+}
+
 function renderCommentsForPost(postId) {
   const listEl = document.getElementById("commentsList");
   const visibleComments = state.comments.filter(
@@ -1470,41 +1774,25 @@ function renderCommentsForPost(postId) {
     return;
   }
 
-  listEl.innerHTML = visibleComments
-    .map(c => `
-      <div class="comment-note ${c.approved ? "" : "is-pending"}">
-        <div class="comment-note-head">
-          <div>
-            <span class="comment-author">${escapeHtml(c.author)}</span>
-            ${c.approved ? "" : `<span class="pending-pill">aguardando aprovação</span>`}
-          </div>
-          <span class="comment-date">${formatDate(c.date)}</span>
-        </div>
-        <p class="comment-body">${escapeHtml(c.text).replaceAll("\n", "<br>")}</p>
-        ${c.reply ? `
-          <div class="owner-reply-box">
-            <span class="owner-reply-badge">愛 ${escapeHtml(state.profile.handle)} respondeu:</span>
-            <p>${escapeHtml(c.reply).replaceAll("\n", "<br>")}</p>
-          </div>
-        ` : ""}
-        <div class="comment-owner-actions owner-only-flex">
-          ${c.approved ? "" : `<button class="btn btn-primary btn-sm" data-approve-id="${escapeHtml(c.id)}">Aprovar</button>`}
-          <button class="btn btn-outline btn-sm" data-reply-id="${escapeHtml(c.id)}">${c.reply ? "Editar resposta" : "Responder"}</button>
-          <button class="btn btn-danger btn-sm" data-delete-comment-id="${escapeHtml(c.id)}">Apagar</button>
-        </div>
-      </div>
-    `)
-    .join("");
+  listEl.innerHTML = renderNoteItemsHtml(visibleComments);
+  bindNoteOwnerButtons(listEl);
+}
 
-  listEl.querySelectorAll("[data-approve-id]").forEach(btn => {
-    btn.addEventListener("click", () => approveComment(btn.dataset.approveId));
-  });
-  listEl.querySelectorAll("[data-reply-id]").forEach(btn => {
-    btn.addEventListener("click", () => replyToComment(btn.dataset.replyId));
-  });
-  listEl.querySelectorAll("[data-delete-comment-id]").forEach(btn => {
-    btn.addEventListener("click", () => deleteComment(btn.dataset.deleteCommentId));
-  });
+function renderGuestbook() {
+  const listEl = document.getElementById("guestbookList");
+  if (!listEl) return;
+
+  const visibleEntries = state.comments.filter(
+    c => c.postId === GUESTBOOK_POST_ID && (c.approved || state.isOwner)
+  );
+
+  if (!visibleEntries.length) {
+    listEl.innerHTML = `<p class="muted-small">O livro de visitas ainda está em branco. Seja o primeiro a assinar!</p>`;
+    return;
+  }
+
+  listEl.innerHTML = renderNoteItemsHtml(visibleEntries);
+  bindNoteOwnerButtons(listEl);
 }
 
 async function approveComment(commentId) {
@@ -1520,7 +1808,7 @@ async function approveComment(commentId) {
 async function replyToComment(commentId) {
   const comment = state.comments.find(c => c.id === commentId);
   if (!comment) return;
-  const answer = prompt(`Responder bilhetinho de ${comment.author}:`, comment.reply || "");
+  const answer = prompt(`Responder recado de ${comment.author}:`, comment.reply || "");
   if (answer === null) return;
   comment.reply = answer.trim();
   comment.replyDate = getLocalTodayIso();
@@ -1532,7 +1820,7 @@ async function replyToComment(commentId) {
 }
 
 async function deleteComment(commentId) {
-  if (!confirm("Apagar este bilhetinho?")) return;
+  if (!confirm("Apagar este recado?")) return;
   state.comments = state.comments.filter(c => c.id !== commentId);
   await removeDoc("comments", commentId);
   syncOwnerUI();
@@ -1545,19 +1833,25 @@ function renderModerationModal() {
   const pending = state.comments.filter(c => !c.approved);
 
   if (!pending.length) {
-    listEl.innerHTML = `<p class="muted-small">Tudo em dia! Nenhum bilhetinho esperando aprovação.</p>`;
+    listEl.innerHTML = `<p class="muted-small">Tudo em dia! Nenhum recado esperando aprovação.</p>`;
     return;
   }
 
   listEl.innerHTML = pending
     .map(c => {
-      const post = state.posts.find(p => p.id === c.postId);
-      const postTitle = post ? post.title : "Texto removido";
+      let originLabel = "Texto removido";
+      if (c.postId === GUESTBOOK_POST_ID) {
+        originLabel = "Livro de visitas";
+      } else {
+        const post = state.posts.find(p => p.id === c.postId);
+        if (post) originLabel = `"${post.title}"`;
+      }
+
       return `
         <div class="comment-note is-pending">
           <div class="comment-note-head">
-            <span class="comment-author">${escapeHtml(c.author)}</span>
-            <span class="comment-date">${formatDate(c.date)} · em "${escapeHtml(postTitle)}"</span>
+            <span class="comment-author">${escapeHtml(c.author)}${c.site ? ` (${escapeHtml(c.site)})` : ""}</span>
+            <span class="comment-date">${formatDate(c.date)} · em ${escapeHtml(originLabel)}</span>
           </div>
           <p class="comment-body">${escapeHtml(c.text)}</p>
           <div class="comment-owner-actions owner-only-flex">
@@ -1588,12 +1882,7 @@ function renderArchive() {
     return;
   }
 
-  const ordered = [...state.posts].sort((a, b) => {
-    const dateDiff = String(b.date || "").localeCompare(String(a.date || ""));
-    if (dateDiff !== 0) return dateDiff;
-    return (b.createdAt || 0) - (a.createdAt || 0);
-  });
-
+  const ordered = getChronologicalPosts();
   container.innerHTML = ordered
     .map(post => `
       <div class="archive-item" data-post-id="${escapeHtml(post.id)}">
@@ -1608,23 +1897,74 @@ function renderArchive() {
   });
 }
 
+function renderProjectFilters() {
+  const bar = document.getElementById("projectFilters");
+  if (!bar) return;
+
+  const statusMap = new Map();
+  state.projects.forEach(proj => {
+    const clean = String(proj.status || "ideia").trim();
+    if (clean) {
+      const key = clean.toLowerCase();
+      if (!statusMap.has(key)) statusMap.set(key, clean);
+    }
+  });
+
+  if (statusMap.size <= 1) {
+    state.activeProjectStatus = "todos";
+    bar.hidden = true;
+    bar.innerHTML = "";
+    return;
+  }
+
+  if (state.activeProjectStatus !== "todos" && !statusMap.has(state.activeProjectStatus)) {
+    state.activeProjectStatus = "todos";
+  }
+
+  bar.hidden = false;
+  const pills = [
+    `<button class="pill ${state.activeProjectStatus === "todos" ? "active" : ""}" data-project-status="todos">Todos</button>`,
+    ...[...statusMap.entries()]
+      .sort((a, b) => a[1].localeCompare(b[1]))
+      .map(([key, label]) => `<button class="pill ${state.activeProjectStatus === key ? "active" : ""}" data-project-status="${escapeHtml(key)}">${escapeHtml(label)}</button>`)
+  ];
+  bar.innerHTML = pills.join("");
+
+  bar.querySelectorAll("[data-project-status]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      state.activeProjectStatus = btn.dataset.projectStatus;
+      renderProjects();
+    });
+  });
+}
+
 function renderProjects() {
+  renderProjectFilters();
+
   const container = document.getElementById("projectsGrid");
   const empty = document.getElementById("projectsEmptyState");
 
-  if (!state.projects.length) {
+  const visibleProjects = state.projects.filter(proj => {
+    if (state.activeProjectStatus === "todos") return true;
+    return String(proj.status || "ideia").trim().toLowerCase() === state.activeProjectStatus;
+  });
+
+  if (!visibleProjects.length) {
     container.innerHTML = "";
     empty.hidden = false;
     return;
   }
 
   empty.hidden = true;
-  container.innerHTML = state.projects
+  container.innerHTML = visibleProjects
     .map(proj => `
       <div class="project-card">
         <div class="project-card-top">
           <span class="project-status">${escapeHtml(proj.status || "ideia")}</span>
-          <button class="project-delete owner-only" data-project-id="${escapeHtml(proj.id)}" title="Remover devaneio" aria-label="Remover devaneio">✕</button>
+          <div class="project-card-actions owner-only-flex">
+            <button class="project-edit" data-edit-project-id="${escapeHtml(proj.id)}" title="Editar devaneio" aria-label="Editar devaneio">✎</button>
+            <button class="project-delete" data-project-id="${escapeHtml(proj.id)}" title="Remover devaneio" aria-label="Remover devaneio">✕</button>
+          </div>
         </div>
         <h3>${escapeHtml(proj.title)}</h3>
         <p>${escapeHtml(proj.description)}</p>
@@ -1632,6 +1972,13 @@ function renderProjects() {
       </div>
     `)
     .join("");
+
+  container.querySelectorAll("[data-edit-project-id]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const proj = state.projects.find(p => p.id === btn.dataset.editProjectId);
+      if (proj) openProjectModal(proj);
+    });
+  });
 
   container.querySelectorAll(".project-delete").forEach(btn => {
     btn.addEventListener("click", async () => {
@@ -1665,6 +2012,7 @@ function switchView(viewName, scrollToFeed = false) {
 
   if (viewName !== "post") {
     state.currentPostId = null;
+    if (state.focusMode) setFocusMode(false);
     if (window.location.hash.startsWith("#post=")) {
       history.replaceState(null, "", window.location.pathname + window.location.search);
     }
@@ -1683,7 +2031,10 @@ function switchView(viewName, scrollToFeed = false) {
   if (viewName === "mural") renderMural();
   if (viewName === "archive") renderArchive();
   if (viewName === "projects") renderProjects();
-  if (viewName === "about") renderAbout();
+  if (viewName === "about") {
+    renderAbout();
+    renderGuestbook();
+  }
 
   if (scrollToFeed && viewName === "home") {
     document.getElementById("feedStart").scrollIntoView({ behavior: "smooth" });
@@ -1721,6 +2072,9 @@ function openPostModal(post = null) {
   document.getElementById("postIdInput").value = post ? post.id : "";
   document.getElementById("postTitleInput").value = post ? post.title : "";
   document.getElementById("postCategoryInput").value = post ? post.category : "pensamentos";
+  document.getElementById("postMoodInput").value = post?.mood || "";
+  document.getElementById("postSongInput").value = post?.song || "";
+  document.getElementById("postSongUrlInput").value = post?.songUrl || "";
   document.getElementById("postContentInput").value = post ? post.content : "";
   document.getElementById("postImageFileInput").value = "";
 
@@ -1764,6 +2118,7 @@ function openPhotoModal() {
   document.getElementById("photoUrlInput").value = "";
   document.getElementById("photoFileInput").value = "";
   document.getElementById("photoCaptionInput").value = "";
+  document.getElementById("photoTagInput").value = "";
   state.tempMuralPhoto = "";
   updateImagePreview("photoPreviewWrap", "photoPreviewImg", "");
   document.getElementById("photoModal").hidden = false;
@@ -1773,12 +2128,14 @@ function closePhotoModal() {
   document.getElementById("photoModal").hidden = true;
 }
 
-function openProjectModal() {
+function openProjectModal(proj = null) {
   if (!state.isOwner) return;
-  document.getElementById("projectTitleInput").value = "";
-  document.getElementById("projectStatusInput").value = "em construção";
-  document.getElementById("projectDescInput").value = "";
-  document.getElementById("projectUrlInput").value = "";
+  document.getElementById("projectModalTitle").textContent = proj ? "Editar devaneio" : "Novo devaneio";
+  document.getElementById("projectIdInput").value = proj ? proj.id : "";
+  document.getElementById("projectTitleInput").value = proj ? proj.title : "";
+  document.getElementById("projectStatusInput").value = proj ? (proj.status || "ideia") : "em construção";
+  document.getElementById("projectDescInput").value = proj ? proj.description : "";
+  document.getElementById("projectUrlInput").value = proj ? (proj.url || "") : "";
   document.getElementById("projectModal").hidden = false;
 }
 
@@ -1792,7 +2149,10 @@ function openLightbox(photoId) {
   state.currentLightboxPhotoId = photoId;
   document.getElementById("lightboxImg").src = photo.url;
   document.getElementById("lightboxCaption").textContent = photo.caption || "Sem legenda";
-  document.getElementById("lightboxDate").textContent = formatDate(photo.date);
+  const dateAndTag = photo.tag
+    ? `${formatDate(photo.date)} · #${photo.tag}`
+    : formatDate(photo.date);
+  document.getElementById("lightboxDate").textContent = dateAndTag;
   document.getElementById("lightboxModal").hidden = false;
 }
 
@@ -1858,6 +2218,7 @@ function exportBackup() {
     photos: state.photos,
     projects: state.projects,
     comments: state.comments,
+    reactions: state.reactions,
     exportedAt: new Date().toISOString()
   };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
@@ -1894,6 +2255,10 @@ function importBackup(file) {
         state.comments = parsed.comments;
         await Promise.all(parsed.comments.map(item => persistDoc("comments", item)));
       }
+      if (Array.isArray(parsed.reactions)) {
+        state.reactions = parsed.reactions;
+        await Promise.all(parsed.reactions.map(item => persistDoc("reactions", item, true)));
+      }
       renderAll();
       switchView("home");
       alert("Backup importado e sincronizado com sucesso!");
@@ -1910,6 +2275,12 @@ function bindEvents() {
   const notifyBtn = document.getElementById("notifyToggleBtn");
   if (notifyBtn) {
     notifyBtn.addEventListener("click", togglePushSubscription);
+  }
+
+  // Modo foco de leitura
+  const focusBtn = document.getElementById("toggleFocusModeBtn");
+  if (focusBtn) {
+    focusBtn.addEventListener("click", () => setFocusMode(!state.focusMode));
   }
 
   // Atalho secreto 1: 3 cliques rápidos no selo 愛
@@ -2154,6 +2525,44 @@ function bindEvents() {
       : "Bilhetinho enviado! Vai aparecer aqui assim que @asonozz aprovar.";
   });
 
+  // Assinar Livro de Visitas
+  document.getElementById("guestbookForm").addEventListener("submit", async e => {
+    e.preventDefault();
+    const author = document.getElementById("guestbookAuthorInput").value.trim();
+    const site = document.getElementById("guestbookSiteInput").value.trim();
+    const text = document.getElementById("guestbookTextInput").value.trim();
+    if (!author || !text) return;
+
+    const newEntry = {
+      id: "gb-" + Date.now(),
+      postId: GUESTBOOK_POST_ID,
+      author,
+      site,
+      text,
+      date: getLocalTodayIso(),
+      createdAt: Date.now(),
+      approved: state.isOwner,
+      reply: "",
+      replyDate: ""
+    };
+
+    const ok = await persistDoc("comments", newEntry);
+    if (!ok) return;
+
+    if (!cloud.enabled) {
+      state.comments.unshift(newEntry);
+      syncOwnerUI();
+      renderGuestbook();
+    }
+
+    document.getElementById("guestbookAuthorInput").value = "";
+    document.getElementById("guestbookSiteInput").value = "";
+    document.getElementById("guestbookTextInput").value = "";
+    document.getElementById("guestbookFeedback").textContent = state.isOwner
+      ? "Assinatura publicada no livro de visitas!"
+      : "Assinatura enviada! Vai aparecer aqui assim que @asonozz aprovar.";
+  });
+
   // Modal de Post
   document.getElementById("newPostBtn").addEventListener("click", () => openPostModal(null));
   document.getElementById("closePostModalBtn").addEventListener("click", closePostModal);
@@ -2188,6 +2597,9 @@ function bindEvents() {
     const title = document.getElementById("postTitleInput").value.trim();
     const category = document.getElementById("postCategoryInput").value;
     const date = document.getElementById("postDateInput")?.value || getLocalTodayIso();
+    const mood = document.getElementById("postMoodInput")?.value.trim() || "";
+    const song = document.getElementById("postSongInput")?.value.trim() || "";
+    const songUrl = document.getElementById("postSongUrlInput")?.value.trim() || "";
     const content = document.getElementById("postContentInput").value.trim();
     const pinned = Boolean(document.getElementById("postPinnedInput")?.checked);
     const shouldNotify = Boolean(document.getElementById("postNotifyInput")?.checked);
@@ -2197,13 +2609,16 @@ function bindEvents() {
     let savedPost;
     if (id) {
       const existing = state.posts.find(p => p.id === id);
-      savedPost = { ...existing, title, category, date, content, image, pinned };
+      savedPost = { ...existing, title, category, date, mood, song, songUrl, content, image, pinned };
     } else {
       savedPost = {
         id: "post-" + Date.now(),
         title,
         category,
         date,
+        mood,
+        song,
+        songUrl,
         createdAt: Date.now(),
         pinned,
         image,
@@ -2269,6 +2684,7 @@ function bindEvents() {
       id: "photo-" + Date.now(),
       url: state.tempMuralPhoto,
       caption: document.getElementById("photoCaptionInput").value.trim(),
+      tag: document.getElementById("photoTagInput").value.trim(),
       date: getLocalTodayIso(),
       createdAt: Date.now()
     };
@@ -2283,34 +2699,42 @@ function bindEvents() {
     closePhotoModal();
   });
 
-  // Modal de Devaneio
-  document.getElementById("addProjectBtn").addEventListener("click", openProjectModal);
+  // Modal de Devaneio (Criar e Editar)
+  document.getElementById("addProjectBtn").addEventListener("click", () => openProjectModal(null));
   document.getElementById("closeProjectModalBtn").addEventListener("click", closeProjectModal);
   document.getElementById("cancelProjectBtn").addEventListener("click", closeProjectModal);
 
   document.getElementById("projectForm").addEventListener("submit", async e => {
     e.preventDefault();
     if (!state.isOwner) return;
+    const id = document.getElementById("projectIdInput").value;
     const title = document.getElementById("projectTitleInput").value.trim();
     const status = document.getElementById("projectStatusInput").value.trim() || "ideia";
     const description = document.getElementById("projectDescInput").value.trim();
     const url = document.getElementById("projectUrlInput").value.trim();
     if (!title || !description) return;
 
-    const newProj = {
-      id: "proj-" + Date.now(),
-      title,
-      status,
-      description,
-      url,
-      createdAt: Date.now()
-    };
+    let savedProj;
+    if (id) {
+      const existing = state.projects.find(p => p.id === id);
+      savedProj = { ...existing, title, status, description, url };
+    } else {
+      savedProj = {
+        id: "proj-" + Date.now(),
+        title,
+        status,
+        description,
+        url,
+        createdAt: Date.now()
+      };
+    }
 
-    const ok = await persistDoc("projects", newProj);
+    const ok = await persistDoc("projects", savedProj);
     if (!ok) return;
 
     if (!cloud.enabled) {
-      state.projects.unshift(newProj);
+      if (id) state.projects = state.projects.map(p => (p.id === id ? savedProj : p));
+      else state.projects.unshift(savedProj);
       renderProjects();
     }
     closeProjectModal();

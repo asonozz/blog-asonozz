@@ -26,12 +26,12 @@ Diário e espaço autoral hospedado em **[asonozz.vercel.app](https://asonozz.ve
 
 ---
 
-### ⋆˚࿔ o que tem por aqui
+### ⋆˚࿔ funcionalidades
 
 * **Caderno & Mural:** textos categorizados (*pensamentos*, *código*, *devaneios*, *diário*), arquivo cronológico, mural de polaroids, fichas de devaneios e bilhetinhos com moderação
-* **Card para compartilhar:** gerador em `<canvas>` para *Story (9:16)*, *Feed (4:5)* e *Quadrado*, com temas claro/noturno, ajuste de tamanho/enquadramento da foto e adaptação do texto
-* **Notificações push:** avisos de novos textos via OneSignal com rota protegida em `api/notify.js`
-* **Ouvindo agora:** widget na barra lateral com disco de vinil animado e equalizador sincronizado com o Last.fm via `api/lastfm.js`
+* **Card para compartilhar:** gerador em `<canvas>` para *Story (9:16)*, *Feed (4:5)* e *Quadrado*, com temas claro/noturno, ajuste de tamanho/enquadramento da foto e adaptação automática do texto
+* **Notificações push:** avisos de novos textos via OneSignal com rota autenticada em `api/notify.js`
+* **Ouvindo agora:** cartão na barra lateral com disco de vinil animado e equalizador sincronizado ao vivo com o Last.fm via `api/lastfm.js`
 * **Persistência:** sincronização em tempo real com Firebase Auth e Firestore
 
 ---
@@ -47,8 +47,6 @@ Diário e espaço autoral hospedado em **[asonozz.vercel.app](https://asonozz.ve
 ---
 
 ### ⋆˚࿔ variáveis de ambiente (vercel)
-
-Para as rotas serverless em `/api` funcionarem na Vercel, configure:
 
 * `ONESIGNAL_APP_ID` — ID público do aplicativo Web no OneSignal
 * `ONESIGNAL_API_KEY` — chave secreta (`os_v2_...`) do OneSignal

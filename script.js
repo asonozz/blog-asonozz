@@ -10,6 +10,7 @@ const FIREBASE_CONFIG = {
 
 const HAS_FIREBASE = Boolean(FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.projectId);
 const GUESTBOOK_POST_ID = "__guestbook__";
+const CODE_FENCE = "\u0060\u0060\u0060";
 
 const STORAGE_KEYS = {
   profile: "asonozz_v3_profile",
@@ -31,6 +32,8 @@ const DEFAULT_PROFILE = {
   bio: "building things. learning along the way. um pequeno quarto na internet para guardar textos, fotos, tentativas e ideias que começaram com um 'e se eu tentasse isso?'.",
   quote: "Look at the light.",
   avatar: "",
+  statusNote: "",
+  statusUpdatedAt: "",
   likesTitle: "Coisas que eu curto",
   likes: ["jogos", "código", "madrugadas calmas", "criar coisas aleatórias"],
   aboutExtra: "Este espaço nasceu para guardar ideias, textos, polaroids e experimentos sem a pressa das redes sociais. Tudo aqui é feito à mão de propósito: um pequeno quarto na internet que muda conforme eu mudo.",
@@ -68,6 +71,7 @@ let state = {
   comments: HAS_FIREBASE ? [] : loadFromStorage(STORAGE_KEYS.comments, []),
   reactions: HAS_FIREBASE ? [] : loadFromStorage(STORAGE_KEYS.reactions, []),
   myReactions: loadFromStorage(STORAGE_KEYS.myReactions, {}),
+  lastfmTopTracks: [],
   isOwner: false,
   focusMode: false,
   activeView: "home",
@@ -77,6 +81,7 @@ let state = {
   searchQuery: "",
   currentPostId: null,
   pendingPostIdFromHash: null,
+  postFormInitialSnapshot: "",
   storyTheme: "light",
   storyFormat: "story",
   storyPhotoMode: "cover",
@@ -169,33 +174,107 @@ function formatRelativeTime(unixSeconds) {
   return `há ${days} dias`;
 }
 
+function stripMarkdown(content = "") {
+  return String(content)
+    .replace(/\u0060{3}[\s\S]*?\u0060{3}/g, " ")
+    .replace(/\u0060([^\u0060]+)\u0060/g, "$1")
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, "$1")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/\*([^*]+)\*/g, "$1")
+    .replace(/^#{1,4}\s+/gm, "")
+    .replace(/^>\s?/gm, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function countWords(text = "") {
+  const clean = stripMarkdown(text);
+  if (!clean) return 0;
+  return clean.split(/\s+/).filter(Boolean).length;
+}
+
 function estimateReadingTime(text = "") {
-  const words = text.trim().split(/\s+/).filter(Boolean).length;
+  const words = countWords(text);
   const mins = Math.max(1, Math.ceil(words / 180));
   return `${mins} min de leitura`;
 }
 
+function formatInlineMarkdown(raw = "") {
+  const tokens = [];
+  const stash = html => {
+    const key = `@@MDTOK_${tokens.length}@@`;
+    tokens.push(html);
+    return key;
+  };
+
+  let working = String(raw);
+
+  working = working.replace(/\u0060([^\u0060\n]+)\u0060/g, (_, code) => {
+    return stash(`<code>${escapeHtml(code)}</code>`);
+  });
+
+  working = working.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (match, label, url) => {
+    const safeUrl = sanitizeExternalUrl(url);
+    if (!safeUrl) return match;
+    return stash(`<a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`);
+  });
+
+  working = escapeHtml(working);
+
+  working = working.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
+  working = working.replace(/\*([^*\n]+)\*/g, "<em>$1</em>");
+
+  working = working.replace(/@@MDTOK_(\d+)@@/g, (_, idx) => tokens[Number(idx)] || "");
+  return working;
+}
+
 function formatPostContent(content = "") {
-  return content
+  const codeBlocks = [];
+  const normalized = String(content).replace(/\r\n/g, "\n");
+
+  const withPlaceholders = normalized.replace(/\u0060{3}([a-zA-Z0-9_-]*)\n?([\s\S]*?)\u0060{3}/g, (_, lang, code) => {
+    const idx = codeBlocks.length;
+    const cleanCode = code.replace(/\n$/, "");
+    codeBlocks.push(`<pre class="post-code-block"><code>${escapeHtml(cleanCode)}</code></pre>`);
+    return `\n\n@@CODEBLOCK_${idx}@@\n\n`;
+  });
+
+  return withPlaceholders
     .split(/\n\s*\n/)
     .map(block => block.trim())
     .filter(Boolean)
     .map(block => {
-      if (block.startsWith(">")) {
-        const clean = block.replace(/^>\s?/, "");
-        return `<blockquote>${escapeHtml(clean).replaceAll("\n", "<br>")}</blockquote>`;
+      const codeMatch = block.match(/^@@CODEBLOCK_(\d+)@@$/);
+      if (codeMatch) {
+        return codeBlocks[Number(codeMatch[1])] || "";
       }
-      return `<p>${escapeHtml(block).replaceAll("\n", "<br>")}</p>`;
+      if (block.startsWith("### ")) {
+        return `<h4>${formatInlineMarkdown(block.slice(4))}</h4>`;
+      }
+      if (block.startsWith("## ")) {
+        return `<h3>${formatInlineMarkdown(block.slice(3))}</h3>`;
+      }
+      if (block.startsWith(">")) {
+        const clean = block
+          .split("\n")
+          .map(line => line.replace(/^>\s?/, ""))
+          .join("\n");
+        return `<blockquote>${formatInlineMarkdown(clean).replaceAll("\n", "<br>")}</blockquote>`;
+      }
+      return `<p>${formatInlineMarkdown(block).replaceAll("\n", "<br>")}</p>`;
     })
     .join("");
 }
 
 function getExcerpt(content = "", maxLen = 165) {
-  const plain = content.replace(/^>\s?/gm, "").replace(/\s+/g, " ").trim();
+  const plain = stripMarkdown(content);
   return plain.length > maxLen ? plain.slice(0, maxLen) + "..." : plain;
 }
 
 function getPostShareUrl(postId) {
+  if (window.location.protocol.startsWith("http")) {
+    return `${window.location.origin}/p/${encodeURIComponent(postId)}`;
+  }
   const base = window.location.origin + window.location.pathname;
   return `${base}#post=${encodeURIComponent(postId)}`;
 }
@@ -231,6 +310,175 @@ function compressImageFile(file, maxWidth, callback) {
     img.src = e.target.result;
   };
   reader.readAsDataURL(file);
+}
+
+// === EDITOR: CONTADOR, FORMATAÇÃO E PROTEÇÃO CONTRA FECHAR SEM SALVAR ===
+function updatePostWordStats() {
+  const statsEl = document.getElementById("postWordStats");
+  const input = document.getElementById("postContentInput");
+  if (!statsEl || !input) return;
+  const words = countWords(input.value);
+  const wordLabel = words === 1 ? "1 palavra" : `${words} palavras`;
+  statsEl.textContent = `${wordLabel} · ${estimateReadingTime(input.value)}`;
+}
+
+function syncDraftControls() {
+  const draftInput = document.getElementById("postDraftInput");
+  const notifyInput = document.getElementById("postNotifyInput");
+  const submitBtn = document.getElementById("submitPostBtn");
+  const isDraft = Boolean(draftInput?.checked);
+
+  if (notifyInput) {
+    if (isDraft) {
+      notifyInput.checked = false;
+      notifyInput.disabled = true;
+    } else {
+      notifyInput.disabled = false;
+    }
+  }
+  if (submitBtn) {
+    submitBtn.textContent = isDraft ? "Salvar rascunho" : "Publicar";
+  }
+}
+
+function getPostFormSnapshot() {
+  return JSON.stringify({
+    title: document.getElementById("postTitleInput")?.value || "",
+    category: document.getElementById("postCategoryInput")?.value || "",
+    date: document.getElementById("postDateInput")?.value || "",
+    mood: document.getElementById("postMoodInput")?.value || "",
+    song: document.getElementById("postSongInput")?.value || "",
+    songUrl: document.getElementById("postSongUrlInput")?.value || "",
+    content: document.getElementById("postContentInput")?.value || "",
+    pinned: Boolean(document.getElementById("postPinnedInput")?.checked),
+    draft: Boolean(document.getElementById("postDraftInput")?.checked),
+    image: state.tempPostImage || ""
+  });
+}
+
+function hasUnsavedPostChanges() {
+  const modal = document.getElementById("postModal");
+  if (!modal || modal.hidden) return false;
+  return getPostFormSnapshot() !== state.postFormInitialSnapshot;
+}
+
+function requestClosePostModal() {
+  const modal = document.getElementById("postModal");
+  if (!modal || modal.hidden) return;
+  if (hasUnsavedPostChanges()) {
+    const ok = confirm("Você tem alterações não salvas neste texto. Deseja fechar e descartar?");
+    if (!ok) return;
+  }
+  closePostModal();
+}
+
+function applyMarkdownFormat(action) {
+  const ta = document.getElementById("postContentInput");
+  if (!ta) return;
+
+  const start = ta.selectionStart;
+  const end = ta.selectionEnd;
+  const value = ta.value;
+  const selected = value.slice(start, end);
+
+  let replacement = "";
+  let cursorOffsetStart = 0;
+  let cursorOffsetEnd = 0;
+
+  if (action === "bold") {
+    const inner = selected || "texto em negrito";
+    replacement = `**${inner}**`;
+    cursorOffsetStart = 2;
+    cursorOffsetEnd = 2 + inner.length;
+  } else if (action === "italic") {
+    const inner = selected || "texto em itálico";
+    replacement = `*${inner}*`;
+    cursorOffsetStart = 1;
+    cursorOffsetEnd = 1 + inner.length;
+  } else if (action === "code") {
+    const inner = selected || "codigo";
+    replacement = `\u0060${inner}\u0060`;
+    cursorOffsetStart = 1;
+    cursorOffsetEnd = 1 + inner.length;
+  } else if (action === "codeblock") {
+    const inner = selected || "// seu código aqui";
+    replacement = `\n${CODE_FENCE}\n${inner}\n${CODE_FENCE}\n`;
+    cursorOffsetStart = 5;
+    cursorOffsetEnd = 5 + inner.length;
+  } else if (action === "heading") {
+    const inner = selected || "Subtítulo";
+    replacement = `## ${inner}`;
+    cursorOffsetStart = 3;
+    cursorOffsetEnd = 3 + inner.length;
+  } else if (action === "quote") {
+    const inner = selected || "Uma citação marcante...";
+    replacement = inner
+      .split("\n")
+      .map(line => `> ${line}`)
+      .join("\n");
+    cursorOffsetStart = 2;
+    cursorOffsetEnd = replacement.length;
+  } else if (action === "link") {
+    const url = prompt("Cole o endereço do link (https://...):", "https://");
+    if (!url || !sanitizeExternalUrl(url)) {
+      if (url !== null) showToast("Use um link começando com https:// ou http://");
+      return;
+    }
+    const label = selected || "texto do link";
+    replacement = `[${label}](${url.trim()})`;
+    cursorOffsetStart = 1;
+    cursorOffsetEnd = 1 + label.length;
+  }
+
+  ta.value = value.slice(0, start) + replacement + value.slice(end);
+  ta.focus();
+  ta.setSelectionRange(start + cursorOffsetStart, start + cursorOffsetEnd);
+  updatePostWordStats();
+}
+
+// === POST-IT DE STATUS NA BARRA LATERAL ===
+function renderStatusPostit() {
+  const card = document.getElementById("statusPostitCard");
+  const textEl = document.getElementById("statusNoteText");
+  const dateEl = document.getElementById("statusNoteDate");
+  if (!card || !textEl || !dateEl) return;
+
+  const note = String(state.profile.statusNote || "").trim();
+  const updated = state.profile.statusUpdatedAt || "";
+
+  if (!note && !state.isOwner) {
+    card.hidden = true;
+    return;
+  }
+
+  card.hidden = false;
+  if (note) {
+    textEl.textContent = note;
+    textEl.classList.remove("is-empty");
+    dateEl.textContent = updated ? `atualizado em ${formatDate(updated)}` : "";
+    dateEl.hidden = !updated;
+  } else {
+    textEl.textContent = "Clique em Editar para colar um post-it rápido aqui.";
+    textEl.classList.add("is-empty");
+    dateEl.hidden = true;
+  }
+}
+
+function toggleStatusNoteEditor(open) {
+  const viewEl = document.getElementById("statusNoteView");
+  const formEl = document.getElementById("statusNoteForm");
+  const inputEl = document.getElementById("statusNoteInput");
+  if (!viewEl || !formEl || !inputEl) return;
+
+  if (open) {
+    inputEl.value = state.profile.statusNote || "";
+    viewEl.hidden = true;
+    formEl.hidden = false;
+    inputEl.focus();
+  } else {
+    formEl.hidden = true;
+    viewEl.hidden = false;
+  }
 }
 
 // === REAÇÕES RÁPIDAS (愛) ===
@@ -308,7 +556,35 @@ function setFocusMode(enabled) {
   }
 }
 
-// === CARTÃO LAST.FM (OUVINDO AGORA / ÚLTIMA OUVIDA) ===
+// === CARTÃO LAST.FM (OUVINDO AGORA + MAIS OUVIDAS DA SEMANA) ===
+function renderWeeklyTopTracks() {
+  const section = document.getElementById("weeklyTracksSection");
+  const listEl = document.getElementById("weeklyTracksList");
+  if (!section || !listEl) return;
+
+  if (!state.lastfmTopTracks.length) {
+    section.hidden = true;
+    listEl.innerHTML = "";
+    return;
+  }
+
+  section.hidden = false;
+  listEl.innerHTML = state.lastfmTopTracks
+    .map((item, idx) => `
+      <li class="weekly-track-item">
+        <a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">
+          <span class="weekly-track-rank">0${idx + 1}</span>
+          <span class="weekly-track-main">
+            <span class="weekly-track-name">${escapeHtml(item.name)}</span>
+            <span class="weekly-track-artist">${escapeHtml(item.artist)}</span>
+          </span>
+          <span class="weekly-track-plays">${item.playcount}x</span>
+        </a>
+      </li>
+    `)
+    .join("");
+}
+
 async function fetchLastFmTrack() {
   const card = document.getElementById("lastfmCard");
   if (!card) return;
@@ -318,7 +594,17 @@ async function fetchLastFmTrack() {
     if (!res.ok) return;
     const data = await res.json();
 
-    if (!data.configured || !data.track) {
+    if (!data.configured) {
+      card.hidden = true;
+      return;
+    }
+
+    if (Array.isArray(data.topTracks)) {
+      state.lastfmTopTracks = data.topTracks;
+      renderWeeklyTopTracks();
+    }
+
+    if (!data.track) {
       card.hidden = true;
       return;
     }
@@ -466,7 +752,7 @@ async function togglePushSubscription() {
 }
 
 async function sendPushNotificationForPost(post) {
-  if (!cloud.enabled || !cloud.auth?.currentUser) return;
+  if (!cloud.enabled || !cloud.auth?.currentUser || post.draft) return;
 
   try {
     const idToken = await cloud.auth.currentUser.getIdToken();
@@ -697,8 +983,16 @@ function syncOwnerUI() {
   const label = pendingCount === 1 ? "1 recado pendente" : `${pendingCount} recados pendentes`;
   document.getElementById("pendingCountText").textContent = label;
 
+  renderStatusPostit();
+  renderPosts();
+  if (state.activeView === "archive") renderArchive();
   if (state.activeView === "post" && state.currentPostId) {
-    renderCommentsForPost(state.currentPostId);
+    const current = state.posts.find(p => p.id === state.currentPostId);
+    if (current?.draft && !state.isOwner) {
+      switchView("home");
+    } else {
+      renderCommentsForPost(state.currentPostId);
+    }
   }
   renderGuestbook();
 }
@@ -743,17 +1037,23 @@ function renderAll() {
   renderMural();
   renderProjects();
   renderGuestbook();
+  renderWeeklyTopTracks();
   syncOwnerUI();
   if (state.activeView === "archive") renderArchive();
   if (state.activeView === "post" && state.currentPostId) openPostDetail(state.currentPostId, false);
 }
 
+function getVisiblePosts() {
+  return state.isOwner ? state.posts : state.posts.filter(p => !p.draft);
+}
+
 function renderCoverStats() {
   const statsEl = document.getElementById("coverStats");
-  const postLabel = state.posts.length === 1 ? "texto no caderno" : "textos no caderno";
+  const publishedCount = state.posts.filter(p => !p.draft).length;
+  const postLabel = publishedCount === 1 ? "texto no caderno" : "textos no caderno";
   const photoLabel = state.photos.length === 1 ? "polaroid no mural" : "polaroids no mural";
   statsEl.innerHTML = `
-    <span><strong>${state.posts.length}</strong> ${postLabel}</span>
+    <span><strong>${publishedCount}</strong> ${postLabel}</span>
     <span>⋆</span>
     <span><strong>${state.photos.length}</strong> ${photoLabel}</span>
   `;
@@ -838,12 +1138,14 @@ function renderProfile() {
     }
   }
 
+  renderStatusPostit();
   renderAbout();
   renderCoverStats();
 }
 
-function getChronologicalPosts() {
-  return [...state.posts].sort((a, b) => {
+function getChronologicalPosts(includeDrafts = false) {
+  const source = includeDrafts ? getVisiblePosts() : state.posts.filter(p => !p.draft);
+  return [...source].sort((a, b) => {
     const dateDiff = String(b.date || "").localeCompare(String(a.date || ""));
     if (dateDiff !== 0) return dateDiff;
     return (b.createdAt || 0) - (a.createdAt || 0);
@@ -854,7 +1156,7 @@ function renderPosts() {
   const container = document.getElementById("postsList");
   const emptyState = document.getElementById("emptyState");
 
-  const filtered = state.posts
+  const filtered = getVisiblePosts()
     .filter(post => {
       const matchesCat = state.activeCategory === "todos" || post.category === state.activeCategory;
       const q = state.searchQuery.toLowerCase();
@@ -868,6 +1170,8 @@ function renderPosts() {
       return matchesCat && matchesQuery;
     })
     .sort((a, b) => {
+      const draftDiff = (b.draft ? 1 : 0) - (a.draft ? 1 : 0);
+      if (draftDiff !== 0) return draftDiff;
       const pinDiff = (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0);
       if (pinDiff !== 0) return pinDiff;
       const dateDiff = String(b.date || "").localeCompare(String(a.date || ""));
@@ -878,6 +1182,7 @@ function renderPosts() {
   if (!filtered.length) {
     container.innerHTML = "";
     emptyState.hidden = false;
+    renderCoverStats();
     return;
   }
 
@@ -890,10 +1195,11 @@ function renderPosts() {
       const hasExtras = Boolean(post.mood || post.song);
 
       return `
-        <article class="post-card ${post.pinned ? "is-pinned" : ""}" data-post-id="${escapeHtml(post.id)}">
+        <article class="post-card ${post.pinned ? "is-pinned" : ""} ${post.draft ? "is-draft" : ""}" data-post-id="${escapeHtml(post.id)}">
           ${post.image ? `<div class="post-card-cover-wrap"><img class="post-card-cover" src="${escapeHtml(post.image)}" alt="${escapeHtml(post.title)}"></div>` : ""}
           <div class="post-card-body">
             <div class="post-meta">
+              ${post.draft ? `<span class="post-draft-badge">rascunho</span>` : ""}
               ${post.pinned ? `<span class="post-pinned-badge">★ fixado</span>` : ""}
               <span class="post-date">${formatDate(post.date)}</span>
               <span class="post-cat">${escapeHtml(post.category)}</span>
@@ -909,7 +1215,7 @@ function renderPosts() {
               </div>
             ` : ""}
             <div class="post-card-footer">
-              <span class="read-more">Ler página inteira →</span>
+              <span class="read-more">${post.draft ? "Continuar rascunho →" : "Ler página inteira →"}</span>
               <span class="post-card-stats">
                 ${reactionCount > 0 ? `<span class="reaction-mini-tag">愛 ${reactionCount}</span>` : ""}
                 <span class="comment-count-tag">${countText}</span>
@@ -1034,7 +1340,7 @@ function renderPostPrevNext(postId) {
   const navEl = document.getElementById("postPrevNext");
   if (!navEl) return;
 
-  const ordered = getChronologicalPosts();
+  const ordered = getChronologicalPosts(false);
   const idx = ordered.findIndex(p => p.id === postId);
   if (idx === -1 || ordered.length <= 1) {
     navEl.innerHTML = "";
@@ -1067,6 +1373,11 @@ function renderPostPrevNext(postId) {
 function openPostDetail(postId, shouldSwitch = true) {
   const post = state.posts.find(p => p.id === postId);
   if (!post) return;
+  if (post.draft && !state.isOwner) {
+    showToast("Este texto ainda é um rascunho privado.");
+    switchView("home");
+    return;
+  }
 
   state.currentPostId = postId;
 
@@ -1083,6 +1394,7 @@ function openPostDetail(postId, shouldSwitch = true) {
   const detailEl = document.getElementById("postDetailContent");
   detailEl.innerHTML = `
     <div class="post-meta">
+      ${post.draft ? `<span class="post-draft-badge">rascunho (só você vê)</span>` : ""}
       ${post.pinned ? `<span class="post-pinned-badge">★ fixado</span>` : ""}
       <span class="post-date">${formatDate(post.date)}</span>
       <span class="post-cat">${escapeHtml(post.category)}</span>
@@ -1105,44 +1417,61 @@ function openPostDetail(postId, shouldSwitch = true) {
     ${post.image ? `<img class="post-detail-cover" src="${escapeHtml(post.image)}" alt="${escapeHtml(post.title)}">` : ""}
     <div class="post-body">${formatPostContent(post.content)}</div>
 
-    <div class="post-reaction-bar">
-      <button type="button" class="reaction-btn ${reacted ? "is-reacted" : ""}" id="reactPostBtn">
-        <span class="reaction-seal" aria-hidden="true">愛</span>
-        <span class="reaction-label">${reacted ? "Selo deixado" : "Deixar um selo"}</span>
-        <span class="reaction-count">${reactionCount}</span>
-      </button>
-      <span class="muted-small">passou por aqui? carimbe a página</span>
-    </div>
-
-    <div class="post-share-bar">
-      <span class="post-share-label">⋆ compartilhar esta página</span>
-      <div class="post-share-buttons">
-        <button class="btn btn-outline btn-sm" id="copyPostLinkBtn">Copiar link</button>
-        <button class="btn btn-primary btn-sm" id="openStoryModalBtn">Card pro Story</button>
+    ${post.draft ? "" : `
+      <div class="post-reaction-bar">
+        <button type="button" class="reaction-btn ${reacted ? "is-reacted" : ""}" id="reactPostBtn">
+          <span class="reaction-seal" aria-hidden="true">愛</span>
+          <span class="reaction-label">${reacted ? "Selo deixado" : "Deixar um selo"}</span>
+          <span class="reaction-count">${reactionCount}</span>
+        </button>
+        <span class="muted-small">passou por aqui? carimbe a página</span>
       </div>
-    </div>
+
+      <div class="post-share-bar">
+        <span class="post-share-label">⋆ compartilhar esta página</span>
+        <div class="post-share-buttons">
+          <button class="btn btn-outline btn-sm" id="copyPostLinkBtn">Copiar link</button>
+          <button class="btn btn-primary btn-sm" id="openStoryModalBtn">Card pro Story</button>
+        </div>
+      </div>
+    `}
 
     <div class="post-detail-actions owner-only-flex">
+      ${post.draft ? `<button class="btn btn-primary btn-sm" id="publishDraftBtn">Publicar agora</button>` : ""}
       <button class="btn btn-outline btn-sm" id="togglePinPostBtn">${post.pinned ? "Desafixar" : "★ Fixar no topo"}</button>
       <button class="btn btn-outline btn-sm" id="editCurrentPostBtn">Editar texto</button>
       <button class="btn btn-danger btn-sm" id="deleteCurrentPostBtn">Excluir</button>
     </div>
   `;
 
-  document.getElementById("reactPostBtn").addEventListener("click", () => stampPostReaction(post.id));
+  const reactBtn = document.getElementById("reactPostBtn");
+  if (reactBtn) {
+    reactBtn.addEventListener("click", () => stampPostReaction(post.id));
+  }
 
   const copyBtn = document.getElementById("copyPostLinkBtn");
-  copyBtn.addEventListener("click", async () => {
-    try {
-      await copyTextToClipboard(getPostShareUrl(post.id));
-      copyBtn.textContent = "✓ Link copiado!";
-      setTimeout(() => (copyBtn.textContent = "Copiar link"), 2200);
-    } catch {
-      alert("Não foi possível copiar o link automaticamente.");
-    }
-  });
+  if (copyBtn) {
+    copyBtn.addEventListener("click", async () => {
+      try {
+        await copyTextToClipboard(getPostShareUrl(post.id));
+        copyBtn.textContent = "✓ Link copiado!";
+        setTimeout(() => (copyBtn.textContent = "Copiar link"), 2200);
+      } catch {
+        alert("Não foi possível copiar o link automaticamente.");
+      }
+    });
+  }
 
-  document.getElementById("openStoryModalBtn").addEventListener("click", () => openShareStoryModal(post));
+  const storyBtn = document.getElementById("openStoryModalBtn");
+  if (storyBtn) {
+    storyBtn.addEventListener("click", () => openShareStoryModal(post));
+  }
+
+  const publishDraftBtn = document.getElementById("publishDraftBtn");
+  if (publishDraftBtn) {
+    publishDraftBtn.addEventListener("click", () => publishDraftPost(post.id));
+  }
+
   document.getElementById("togglePinPostBtn").addEventListener("click", () => togglePinPost(post.id));
   document.getElementById("editCurrentPostBtn").addEventListener("click", () => openPostModal(post));
   document.getElementById("deleteCurrentPostBtn").addEventListener("click", () => deletePost(post.id));
@@ -1154,7 +1483,34 @@ function openPostDetail(postId, shouldSwitch = true) {
     switchView("post");
   }
 
+  document.getElementById("commentsSection").hidden = Boolean(post.draft);
   renderCommentsForPost(postId);
+}
+
+async function publishDraftPost(postId) {
+  if (!state.isOwner) return;
+  const post = state.posts.find(p => p.id === postId);
+  if (!post) return;
+  post.draft = false;
+  const ok = await persistDoc("posts", post);
+  if (ok) {
+    renderPosts();
+    openPostDetail(postId, false);
+    showToast("Rascunho publicado no caderno!");
+  }
+}
+
+function openRandomPost() {
+  const published = state.posts.filter(p => !p.draft);
+  if (!published.length) {
+    showToast("Ainda não há textos publicados para sortear.");
+    return;
+  }
+  const pool = published.length > 1 && state.currentPostId
+    ? published.filter(p => p.id !== state.currentPostId)
+    : published;
+  const picked = pool[Math.floor(Math.random() * pool.length)];
+  openPostDetail(picked.id, true);
 }
 
 // === GERADOR DE CARD PARA STORIES / FEED / QUADRADO ===
@@ -1592,10 +1948,7 @@ async function renderStoryCard(post) {
 
   cursorY += pillH + (compactMeta ? 18 : format === "square" ? 26 : 34);
 
-  const cleanExcerpt = String(post.content || "")
-    .replace(/^>\s?/gm, "")
-    .replace(/\s+/g, " ")
-    .trim();
+  const cleanExcerpt = stripMarkdown(post.content);
 
   const textZoneH = Math.max(80, footerY - cursorY - 16);
   const typo = computeAdaptiveTypography(ctx, post.title, cleanExcerpt, contentW, textZoneH, format, fonts);
@@ -1877,16 +2230,17 @@ function renderModerationModal() {
 
 function renderArchive() {
   const container = document.getElementById("archiveList");
-  if (!state.posts.length) {
+  const ordered = getChronologicalPosts(true);
+
+  if (!ordered.length) {
     container.innerHTML = `<div class="empty-state"><p>Ainda não há textos no arquivo.</p></div>`;
     return;
   }
 
-  const ordered = getChronologicalPosts();
   container.innerHTML = ordered
     .map(post => `
       <div class="archive-item" data-post-id="${escapeHtml(post.id)}">
-        <span class="archive-item-title">${post.pinned ? "★ " : ""}${escapeHtml(post.title)}</span>
+        <span class="archive-item-title">${post.draft ? "[rascunho] " : ""}${post.pinned ? "★ " : ""}${escapeHtml(post.title)}</span>
         <span class="archive-item-date">${formatDate(post.date)} · ${escapeHtml(post.category)}</span>
       </div>
     `)
@@ -2033,6 +2387,7 @@ function switchView(viewName, scrollToFeed = false) {
   if (viewName === "projects") renderProjects();
   if (viewName === "about") {
     renderAbout();
+    renderWeeklyTopTracks();
     renderGuestbook();
   }
 
@@ -2084,22 +2439,30 @@ function openPostModal(post = null) {
   const pinInput = document.getElementById("postPinnedInput");
   if (pinInput) pinInput.checked = Boolean(post?.pinned);
 
+  const draftInput = document.getElementById("postDraftInput");
+  if (draftInput) draftInput.checked = Boolean(post?.draft);
+
   const notifyRow = document.getElementById("postNotifyRow");
   const notifyInput = document.getElementById("postNotifyInput");
   if (notifyRow && notifyInput) {
     notifyRow.hidden = !cloud.enabled;
-    notifyInput.checked = !post;
+    notifyInput.checked = !post && !post?.draft;
   }
 
   const isDataUrl = post?.image?.startsWith("data:");
   document.getElementById("postImageUrlInput").value = post?.image && !isDataUrl ? post.image : "";
   state.tempPostImage = post?.image || "";
   updateImagePreview("postImagePreview", "postImagePreviewImg", state.tempPostImage);
+  updatePostWordStats();
+  syncDraftControls();
+
+  state.postFormInitialSnapshot = getPostFormSnapshot();
   modal.hidden = false;
 }
 
 function closePostModal() {
   document.getElementById("postModal").hidden = true;
+  state.postFormInitialSnapshot = "";
 }
 
 async function deletePost(postId) {
@@ -2271,19 +2634,74 @@ function importBackup(file) {
 
 // Eventos
 function bindEvents() {
-  // Botão do sininho de notificações push
+  window.addEventListener("beforeunload", e => {
+    if (hasUnsavedPostChanges()) {
+      e.preventDefault();
+      e.returnValue = "";
+    }
+  });
+
+  const backToTopBtn = document.getElementById("backToTopBtn");
+  if (backToTopBtn) {
+    backToTopBtn.addEventListener("click", () => {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+  }
+
+  const randomBtn = document.getElementById("randomPostBtn");
+  if (randomBtn) {
+    randomBtn.addEventListener("click", openRandomPost);
+  }
+
+  const editStatusBtn = document.getElementById("editStatusNoteBtn");
+  if (editStatusBtn) {
+    editStatusBtn.addEventListener("click", () => toggleStatusNoteEditor(true));
+  }
+  const cancelStatusBtn = document.getElementById("cancelStatusNoteBtn");
+  if (cancelStatusBtn) {
+    cancelStatusBtn.addEventListener("click", () => toggleStatusNoteEditor(false));
+  }
+  const clearStatusBtn = document.getElementById("clearStatusNoteBtn");
+  if (clearStatusBtn) {
+    clearStatusBtn.addEventListener("click", async () => {
+      if (!state.isOwner) return;
+      state.profile.statusNote = "";
+      state.profile.statusUpdatedAt = "";
+      const ok = await persistProfile();
+      if (ok) {
+        toggleStatusNoteEditor(false);
+        renderStatusPostit();
+        showToast("Post-it removido.");
+      }
+    });
+  }
+  const statusForm = document.getElementById("statusNoteForm");
+  if (statusForm) {
+    statusForm.addEventListener("submit", async e => {
+      e.preventDefault();
+      if (!state.isOwner) return;
+      const val = document.getElementById("statusNoteInput").value.trim();
+      state.profile.statusNote = val;
+      state.profile.statusUpdatedAt = val ? getLocalTodayIso() : "";
+      const ok = await persistProfile();
+      if (ok) {
+        toggleStatusNoteEditor(false);
+        renderStatusPostit();
+        showToast(val ? "Post-it colado na barra lateral!" : "Post-it removido.");
+      }
+    });
+  }
+
   const notifyBtn = document.getElementById("notifyToggleBtn");
   if (notifyBtn) {
     notifyBtn.addEventListener("click", togglePushSubscription);
   }
 
-  // Modo foco de leitura
   const focusBtn = document.getElementById("toggleFocusModeBtn");
   if (focusBtn) {
     focusBtn.addEventListener("click", () => setFocusMode(!state.focusMode));
   }
 
-  // Atalho secreto 1: 3 cliques rápidos no selo 愛
   let sealClicks = 0;
   let sealTimer = null;
   document.getElementById("headerSeal").addEventListener("click", e => {
@@ -2299,10 +2717,8 @@ function bindEvents() {
     sealTimer = setTimeout(() => (sealClicks = 0), 650);
   });
 
-  // Atalho secreto 2 (/#admin) + links diretos de post (/#post=...)
   window.addEventListener("hashchange", checkUrlHash);
 
-  // Modal de Card / Story
   document.getElementById("closeShareStoryModalBtn").addEventListener("click", closeShareStoryModal);
 
   ["storyThemeLightBtn", "storyThemeDarkBtn"].forEach(btnId => {
@@ -2401,7 +2817,6 @@ function bindEvents() {
     }
   });
 
-  // Login e Logout
   document.getElementById("closeLoginModalBtn").addEventListener("click", closeLoginModal);
 
   document.getElementById("demoLoginBtn").addEventListener("click", () => {
@@ -2439,7 +2854,6 @@ function bindEvents() {
     }
   });
 
-  // Moderação
   document.getElementById("pendingBadgeBtn").addEventListener("click", () => {
     renderModerationModal();
     document.getElementById("moderationModal").hidden = false;
@@ -2448,7 +2862,6 @@ function bindEvents() {
     document.getElementById("moderationModal").hidden = true;
   });
 
-  // Navegação
   document.querySelectorAll("[data-view]").forEach(el => {
     el.addEventListener("click", e => {
       e.preventDefault();
@@ -2489,7 +2902,6 @@ function bindEvents() {
     });
   });
 
-  // Enviar Bilhetinho
   document.getElementById("commentForm").addEventListener("submit", async e => {
     e.preventDefault();
     if (!state.currentPostId) return;
@@ -2525,7 +2937,6 @@ function bindEvents() {
       : "Bilhetinho enviado! Vai aparecer aqui assim que @asonozz aprovar.";
   });
 
-  // Assinar Livro de Visitas
   document.getElementById("guestbookForm").addEventListener("submit", async e => {
     e.preventDefault();
     const author = document.getElementById("guestbookAuthorInput").value.trim();
@@ -2563,10 +2974,16 @@ function bindEvents() {
       : "Assinatura enviada! Vai aparecer aqui assim que @asonozz aprovar.";
   });
 
-  // Modal de Post
   document.getElementById("newPostBtn").addEventListener("click", () => openPostModal(null));
-  document.getElementById("closePostModalBtn").addEventListener("click", closePostModal);
-  document.getElementById("cancelPostBtn").addEventListener("click", closePostModal);
+  document.getElementById("closePostModalBtn").addEventListener("click", requestClosePostModal);
+  document.getElementById("cancelPostBtn").addEventListener("click", requestClosePostModal);
+
+  document.getElementById("postContentInput").addEventListener("input", updatePostWordStats);
+  document.getElementById("postDraftInput").addEventListener("change", syncDraftControls);
+
+  document.querySelectorAll("#postFormatToolbar [data-md-action]").forEach(btn => {
+    btn.addEventListener("click", () => applyMarkdownFormat(btn.dataset.mdAction));
+  });
 
   document.getElementById("postImageUrlInput").addEventListener("input", e => {
     state.tempPostImage = e.target.value.trim();
@@ -2602,14 +3019,15 @@ function bindEvents() {
     const songUrl = document.getElementById("postSongUrlInput")?.value.trim() || "";
     const content = document.getElementById("postContentInput").value.trim();
     const pinned = Boolean(document.getElementById("postPinnedInput")?.checked);
-    const shouldNotify = Boolean(document.getElementById("postNotifyInput")?.checked);
+    const draft = Boolean(document.getElementById("postDraftInput")?.checked);
+    const shouldNotify = !draft && Boolean(document.getElementById("postNotifyInput")?.checked);
     const image = state.tempPostImage;
     if (!title || !content) return;
 
     let savedPost;
     if (id) {
       const existing = state.posts.find(p => p.id === id);
-      savedPost = { ...existing, title, category, date, mood, song, songUrl, content, image, pinned };
+      savedPost = { ...existing, title, category, date, mood, song, songUrl, content, image, pinned, draft };
     } else {
       savedPost = {
         id: "post-" + Date.now(),
@@ -2621,6 +3039,7 @@ function bindEvents() {
         songUrl,
         createdAt: Date.now(),
         pinned,
+        draft,
         image,
         content
       };
@@ -2637,7 +3056,9 @@ function bindEvents() {
 
     closePostModal();
 
-    if (shouldNotify) {
+    if (draft) {
+      showToast("Rascunho salvo! Só você consegue ver por enquanto.");
+    } else if (shouldNotify) {
       sendPushNotificationForPost(savedPost);
     }
 
@@ -2645,7 +3066,6 @@ function bindEvents() {
     else switchView("home", true);
   });
 
-  // Modal de Foto (Mural)
   document.getElementById("addPhotoBtn").addEventListener("click", openPhotoModal);
   document.getElementById("closePhotoModalBtn").addEventListener("click", closePhotoModal);
   document.getElementById("cancelPhotoBtn").addEventListener("click", closePhotoModal);
@@ -2699,7 +3119,6 @@ function bindEvents() {
     closePhotoModal();
   });
 
-  // Modal de Devaneio (Criar e Editar)
   document.getElementById("addProjectBtn").addEventListener("click", () => openProjectModal(null));
   document.getElementById("closeProjectModalBtn").addEventListener("click", closeProjectModal);
   document.getElementById("cancelProjectBtn").addEventListener("click", closeProjectModal);
@@ -2740,11 +3159,9 @@ function bindEvents() {
     closeProjectModal();
   });
 
-  // Lightbox
   document.getElementById("closeLightboxBtn").addEventListener("click", closeLightbox);
   document.getElementById("deletePhotoBtn").addEventListener("click", deleteCurrentPhoto);
 
-  // Modal de Perfil
   document.getElementById("editProfileBtn").addEventListener("click", openProfileModal);
   document.getElementById("closeProfileModalBtn").addEventListener("click", closeProfileModal);
   document.getElementById("cancelProfileBtn").addEventListener("click", closeProfileModal);
@@ -2784,6 +3201,7 @@ function bindEvents() {
       : state.profile.likes;
 
     state.profile = {
+      ...state.profile,
       name: document.getElementById("profileNameInput").value.trim() || "asonozz.",
       handle: document.getElementById("profileHandleInput").value.trim() || "@asonozz",
       tagline: document.getElementById("profileTaglineInput").value.trim(),
@@ -2808,15 +3226,17 @@ function bindEvents() {
     }
   });
 
-  // Backup
   document.getElementById("exportDataBtn").addEventListener("click", exportBackup);
   document.getElementById("importDataInput").addEventListener("change", e => {
     if (e.target.files[0]) importBackup(e.target.files[0]);
     e.target.value = "";
   });
 
-  // Fechar modais ao clicar fora ou apertar Escape
-  ["postModal", "profileModal", "photoModal", "projectModal", "lightboxModal", "loginModal", "moderationModal", "shareStoryModal"].forEach(modalId => {
+  document.getElementById("postModal").addEventListener("click", e => {
+    if (e.target.id === "postModal") requestClosePostModal();
+  });
+
+  ["profileModal", "photoModal", "projectModal", "lightboxModal", "loginModal", "moderationModal", "shareStoryModal"].forEach(modalId => {
     const modal = document.getElementById(modalId);
     modal.addEventListener("click", e => {
       if (e.target === modal) modal.hidden = true;
@@ -2825,7 +3245,10 @@ function bindEvents() {
 
   document.addEventListener("keydown", e => {
     if (e.key === "Escape") {
-      closePostModal();
+      if (!document.getElementById("postModal").hidden) {
+        requestClosePostModal();
+        return;
+      }
       closeProfileModal();
       closePhotoModal();
       closeProjectModal();
@@ -2845,6 +3268,7 @@ function initScrollTelling() {
   const cover = document.getElementById("siteCover");
   const coverInner = document.getElementById("coverInner");
   const coverWatermark = document.getElementById("coverWatermark");
+  const backToTopBtn = document.getElementById("backToTopBtn");
   let ticking = false;
 
   function updateOnScroll() {
@@ -2854,6 +3278,9 @@ function initScrollTelling() {
 
     progressBar.style.transform = `scaleX(${progress})`;
     header.classList.toggle("is-scrolled", scrollTop > 14);
+    if (backToTopBtn) {
+      backToTopBtn.hidden = scrollTop < 420;
+    }
 
     if (!prefersReducedMotion && cover && !cover.hidden) {
       const coverHeight = cover.offsetHeight || window.innerHeight;
